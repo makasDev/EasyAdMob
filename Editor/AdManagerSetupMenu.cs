@@ -162,35 +162,51 @@ namespace EasyAdMob.Editor
             // 1. Configure Google Mobile Ads Settings Asset
             Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
                                    ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
-
+        
             if (googleSettingsType != null)
             {
-                PropertyInfo instanceProp = googleSettingsType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
-                object settingsInstance = instanceProp?.GetValue(null);
-
+                // Force-load the asset instance directly from Resources/AssetDatabase if possible
+                UnityEngine.Object settingsInstance = Resources.Load("GoogleMobileAdsSettings");
+        
+                // If not loaded, fallback to property getter
+                if (settingsInstance == null)
+                {
+                    PropertyInfo instanceProp = googleSettingsType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+                    settingsInstance = instanceProp?.GetValue(null) as UnityEngine.Object;
+                }
+        
                 if (settingsInstance != null)
                 {
-                    SerializedObject serializedSettings = new SerializedObject((UnityEngine.Object)settingsInstance);
+                    SerializedObject serializedSettings = new SerializedObject(settingsInstance);
                     
                     SerializedProperty adMobAndroidAppIdProp = serializedSettings.FindProperty("adMobAndroidAppId");
                     SerializedProperty adMobIOSAppIdProp = serializedSettings.FindProperty("adMobIOSAppId");
-
+        
                     if (adMobAndroidAppIdProp != null && !string.IsNullOrEmpty(androidAppId))
-                        adMobAndroidAppIdProp.stringValue = androidAppId;
-
+                    {
+                        adMobAndroidAppIdProp.stringValue = androidAppId.Trim();
+                    }
+        
                     if (adMobIOSAppIdProp != null && !string.IsNullOrEmpty(iosAppId))
-                        adMobIOSAppIdProp.stringValue = iosAppId;
-
+                    {
+                        adMobIOSAppIdProp.stringValue = iosAppId.Trim();
+                    }
+        
                     serializedSettings.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(settingsInstance);
                     AssetDatabase.SaveAssets();
-                    Debug.Log("[EasyAdMob] Updated Google Mobile Ads App IDs in Settings.");
+                    Debug.Log("[EasyAdMob] Successfully updated Google Mobile Ads App IDs!");
+                }
+                else
+                {
+                    Debug.LogWarning("[EasyAdMob] Could not find or instantiate GoogleMobileAdsSettings asset. Open 'Assets > Google Mobile Ads > Settings' once in Unity to create it.");
                 }
             }
             else
             {
-                Debug.LogWarning("[EasyAdMob] GoogleMobileAdsSettings not found. Ensure the AdMob package is imported.");
+                Debug.LogWarning("[EasyAdMob] GoogleMobileAdsSettings type not found. Ensure Google Mobile Ads SDK is installed.");
             }
-
+        
             // 2. Configure AdManager in Scene
             Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
             if (adManagerType != null)
@@ -199,13 +215,14 @@ namespace EasyAdMob.Editor
                 if (adManagerObj != null)
                 {
                     SerializedObject serializedAdManager = new SerializedObject(adManagerObj);
-
+        
                     SetSerializedString(serializedAdManager, "bannerAdUnitId", bannerId);
                     SetSerializedString(serializedAdManager, "interstitialAdUnitId", interstitialId);
                     SetSerializedString(serializedAdManager, "rewardedAdUnitId", rewardedId);
                     SetSerializedString(serializedAdManager, "rewardedInterstitialAdUnitId", rewardedInterstitialId);
-
+        
                     serializedAdManager.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(adManagerObj);
                     Debug.Log("[EasyAdMob] Applied Ad Unit IDs to [AdManager] in active scene.");
                 }
             }
