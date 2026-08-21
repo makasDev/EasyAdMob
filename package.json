@@ -1,0 +1,18 @@
+{
+  "name": "com.makasDev.EasyAdMob",
+  "version": "1.0.0",
+  "displayName": "Easy AdMob",
+  "description": "A simple, light wrapper to quickly load and display Google Mobile Ads (Banner, Interstitial, Rewarded).",
+  "unity": "6000.0",
+  "keywords": [
+    "admob",
+    "ads",
+    "monetization",
+    "mobile"
+  ],
+  "author": {
+    "name": "makasDev",
+    "url": "https://github.com/makasdev"
+  },
+  "dependencies": {}
+}
