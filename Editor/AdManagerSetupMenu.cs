@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;
@@ -18,11 +19,19 @@ namespace EasyAdMob.Editor
         private bool isDownloading = false;
         private float downloadProgress = 0f;
 
+        // --- ID FIELDS ---
+        private string androidAppId = "";
+        private string iosAppId = "";
+        private string bannerId = "ca-app-pub-3940256099942544/6300978111";
+        private string interstitialId = "ca-app-pub-3940256099942544/1033173712";
+        private string rewardedId = "ca-app-pub-3940256099942544/5224354917";
+        private string rewardedInterstitialId = "ca-app-pub-3940256099942544/5354046379";
+
         [MenuItem("Tools/EasyAdMob/Setup Wizard", false, 0)]
         public static void ShowWindow()
         {
             var window = GetWindow<AdManagerSetupMenu>("EasyAdMob Setup");
-            window.minSize = new Vector2(400, 320);
+            window.minSize = new Vector2(420, 520);
             window.Show();
         }
 
@@ -30,15 +39,15 @@ namespace EasyAdMob.Editor
         {
             GUILayout.Space(10);
             EditorGUILayout.LabelField("EasyAdMob Setup Wizard", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Use this wizard to install Google Mobile Ads dependencies and configure the AdManager in your active scene.", MessageType.Info);
+            EditorGUILayout.HelpBox("Use this wizard to install dependencies, configure App/Ad IDs, and setup AdManager in your active scene.", MessageType.Info);
             
             GUILayout.Space(10);
 
-            // --- STEP 1: DEPENDENCY CHECK & INSTALL ---
+            // --- STEP 1: DEPENDENCIES ---
             bool hasAdMobAssembly = CheckAdMobInstalled();
             
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Step 1: Dependencies", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Step 1: Dependencies & Symbols", EditorStyles.boldLabel);
             
             if (hasAdMobAssembly)
             {
@@ -46,41 +55,57 @@ namespace EasyAdMob.Editor
             }
             else
             {
-                EditorGUILayout.HelpBox("Google Mobile Ads SDK not detected in assembly definitions.", MessageType.Warning);
+                EditorGUILayout.HelpBox("Google Mobile Ads SDK not detected.", MessageType.Warning);
                 
                 GUI.enabled = !isDownloading;
-                if (GUILayout.Button(isDownloading ? $"Downloading ({downloadProgress * 100:F0}%)..." : "Download & Install Google Mobile Ads", GUILayout.Height(30)))
+                if (GUILayout.Button(isDownloading ? $"Downloading ({downloadProgress * 100:F0}%)..." : "Download & Install Google Mobile Ads", GUILayout.Height(28)))
                 {
                     DownloadAndInstallAdMob();
                 }
                 GUI.enabled = true;
             }
-            EditorGUILayout.EndVertical();
 
-            GUILayout.Space(10);
-
-            // --- STEP 2: SCENE SETUP ---
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Step 2: Scene Configuration", EditorStyles.boldLabel);
-
-            if (GUILayout.Button("Create [AdManager] in Active Scene", GUILayout.Height(30)))
+            bool hasDefine = HasScriptingDefineSymbol();
+            if (!hasDefine && GUILayout.Button("Add Scripting Define Symbol"))
             {
-                CreateAdManagerInScene();
+                AddScriptingDefineSymbol();
             }
             EditorGUILayout.EndVertical();
 
             GUILayout.Space(10);
 
-            // --- STEP 3: SYMBOL UTILITY ---
+            // --- STEP 2: ID CONFIGURATION ---
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Step 3: Scripting Defines", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Step 2: App & Ad Unit IDs", EditorStyles.boldLabel);
             
-            bool hasDefine = HasScriptingDefineSymbol();
-            EditorGUILayout.LabelField($"Define Symbol ({SCRIPTING_DEFINE_SYMBOL}):", hasDefine ? "ACTIVE" : "MISSING");
+            EditorGUILayout.LabelField("Google Mobile Ads App IDs", EditorStyles.miniBoldLabel);
+            androidAppId = EditorGUILayout.TextField("Android App ID", androidAppId);
+            iosAppId = EditorGUILayout.TextField("iOS App ID", iosAppId);
 
-            if (!hasDefine && GUILayout.Button("Force Add Scripting Define Symbol"))
+            GUILayout.Space(5);
+            EditorGUILayout.LabelField("Ad Unit IDs (Defaults are Test IDs)", EditorStyles.miniBoldLabel);
+            bannerId = EditorGUILayout.TextField("Banner ID", bannerId);
+            interstitialId = EditorGUILayout.TextField("Interstitial ID", interstitialId);
+            rewardedId = EditorGUILayout.TextField("Rewarded ID", rewardedId);
+            rewardedInterstitialId = EditorGUILayout.TextField("Rewarded Interstitial ID", rewardedInterstitialId);
+
+            GUILayout.Space(5);
+            if (GUILayout.Button("Apply IDs to AdManager & Settings", GUILayout.Height(28)))
             {
-                AddScriptingDefineSymbol();
+                ApplyIDsToProjectAndScene();
+            }
+            EditorGUILayout.EndVertical();
+
+            GUILayout.Space(10);
+
+            // --- STEP 3: SCENE SETUP ---
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Step 3: Scene Setup", EditorStyles.boldLabel);
+
+            if (GUILayout.Button("Create [AdManager] in Active Scene", GUILayout.Height(28)))
+            {
+                CreateAdManagerInScene();
+                ApplyIDsToProjectAndScene();
             }
             EditorGUILayout.EndVertical();
         }
@@ -132,6 +157,69 @@ namespace EasyAdMob.Editor
             EditorApplication.update += updateProgress;
         }
 
+        private void ApplyIDsToProjectAndScene()
+        {
+            // 1. Configure Google Mobile Ads Settings Asset
+            Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
+                                   ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
+
+            if (googleSettingsType != null)
+            {
+                PropertyInfo instanceProp = googleSettingsType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+                object settingsInstance = instanceProp?.GetValue(null);
+
+                if (settingsInstance != null)
+                {
+                    SerializedObject serializedSettings = new SerializedObject((UnityEngine.Object)settingsInstance);
+                    
+                    SerializedProperty adMobAndroidAppIdProp = serializedSettings.FindProperty("adMobAndroidAppId");
+                    SerializedProperty adMobIOSAppIdProp = serializedSettings.FindProperty("adMobIOSAppId");
+
+                    if (adMobAndroidAppIdProp != null && !string.IsNullOrEmpty(androidAppId))
+                        adMobAndroidAppIdProp.stringValue = androidAppId;
+
+                    if (adMobIOSAppIdProp != null && !string.IsNullOrEmpty(iosAppId))
+                        adMobIOSAppIdProp.stringValue = iosAppId;
+
+                    serializedSettings.ApplyModifiedProperties();
+                    AssetDatabase.SaveAssets();
+                    Debug.Log("[EasyAdMob] Updated Google Mobile Ads App IDs in Settings.");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("[EasyAdMob] GoogleMobileAdsSettings not found. Ensure the AdMob package is imported.");
+            }
+
+            // 2. Configure AdManager in Scene
+            Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
+            if (adManagerType != null)
+            {
+                UnityEngine.Object adManagerObj = FindObjectOfType(adManagerType);
+                if (adManagerObj != null)
+                {
+                    SerializedObject serializedAdManager = new SerializedObject(adManagerObj);
+
+                    SetSerializedString(serializedAdManager, "bannerAdUnitId", bannerId);
+                    SetSerializedString(serializedAdManager, "interstitialAdUnitId", interstitialId);
+                    SetSerializedString(serializedAdManager, "rewardedAdUnitId", rewardedId);
+                    SetSerializedString(serializedAdManager, "rewardedInterstitialAdUnitId", rewardedInterstitialId);
+
+                    serializedAdManager.ApplyModifiedProperties();
+                    Debug.Log("[EasyAdMob] Applied Ad Unit IDs to [AdManager] in active scene.");
+                }
+            }
+        }
+
+        private void SetSerializedString(SerializedObject target, string propertyName, string value)
+        {
+            SerializedProperty prop = target.FindProperty(propertyName);
+            if (prop != null && !string.IsNullOrEmpty(value))
+            {
+                prop.stringValue = value;
+            }
+        }
+
         private void CreateAdManagerInScene()
         {
             Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
@@ -154,10 +242,6 @@ namespace EasyAdMob.Editor
             if (adManagerType != null)
             {
                 go.AddComponent(adManagerType);
-            }
-            else
-            {
-                Debug.LogWarning("[EasyAdMob] AdManager runtime script was not resolved. Ensure assembly definitions compile.");
             }
 
             Undo.RegisterCreatedObjectUndo(go, "Create [AdManager]");
