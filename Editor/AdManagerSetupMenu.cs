@@ -5,8 +5,11 @@ using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEditor.Build;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.Networking;
+using UnityEngine.UI;
 
 namespace EasyAdMob.Editor
 {
@@ -39,18 +42,18 @@ namespace EasyAdMob.Editor
         public static void ShowWindow()
         {
             var window = GetWindow<AdManagerSetupMenu>("EasyAdMob Setup");
-            window.minSize = new Vector2(440, 560);
+            window.minSize = new Vector2(440, 620);
             window.Show();
         }
 
         private void OnGUI()
         {
             float originalLabelWidth = EditorGUIUtility.labelWidth;
-            EditorGUIUtility.labelWidth = 150f; // Fix field label clipping
+            EditorGUIUtility.labelWidth = 150f;
 
             GUILayout.Space(10);
             EditorGUILayout.LabelField("EasyAdMob Setup Wizard", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Use this wizard to install dependencies, configure App/Ad IDs, and setup AdManager in your active scene.", MessageType.Info);
+            EditorGUILayout.HelpBox("Use this wizard to install dependencies, configure App/Ad IDs, and setup AdManager in your scene.", MessageType.Info);
             
             GUILayout.Space(10);
 
@@ -103,7 +106,6 @@ namespace EasyAdMob.Editor
 
             GUILayout.Space(10);
 
-            // Button Row - Uniform Heights and Padding
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Fill Test IDs", GUILayout.Height(30)))
             {
@@ -129,6 +131,13 @@ namespace EasyAdMob.Editor
             {
                 CreateAdManagerInScene();
                 ApplyIDsToProjectAndScene();
+            }
+
+            GUILayout.Space(4);
+
+            if (GUILayout.Button("Generate Showcase Demo Scene", GUILayout.Height(30)))
+            {
+                GenerateShowcaseScene();
             }
             EditorGUILayout.EndVertical();
 
@@ -195,7 +204,6 @@ namespace EasyAdMob.Editor
 
         private void ApplyIDsToProjectAndScene()
         {
-            // 1. Configure Google Mobile Ads Settings Asset
             Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
                                    ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
 
@@ -236,12 +244,7 @@ namespace EasyAdMob.Editor
                     Debug.LogWarning("[EasyAdMob] Could not find or instantiate GoogleMobileAdsSettings asset. Open 'Assets > Google Mobile Ads > Settings' once in Unity to create it.");
                 }
             }
-            else
-            {
-                Debug.LogWarning("[EasyAdMob] GoogleMobileAdsSettings type not found. Ensure Google Mobile Ads SDK is installed.");
-            }
 
-            // 2. Configure AdManager in Scene
             Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
             if (adManagerType != null)
             {
@@ -271,7 +274,7 @@ namespace EasyAdMob.Editor
             }
         }
 
-        private void CreateAdManagerInScene()
+        private GameObject CreateAdManagerInScene()
         {
             Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
             
@@ -284,8 +287,7 @@ namespace EasyAdMob.Editor
             if (existingInstance != null)
             {
                 Selection.activeGameObject = ((Component)existingInstance).gameObject;
-                Debug.LogWarning("[EasyAdMob] An AdManager object already exists in this scene. Selected existing instance.");
-                return;
+                return ((Component)existingInstance).gameObject;
             }
 
             GameObject go = new GameObject("[AdManager]");
@@ -298,6 +300,98 @@ namespace EasyAdMob.Editor
             Undo.RegisterCreatedObjectUndo(go, "Create [AdManager]");
             Selection.activeGameObject = go;
             Debug.Log("[EasyAdMob] Created [AdManager] GameObject in current scene.");
+            return go;
+        }
+
+        private void GenerateShowcaseScene()
+        {
+            if (!Directory.Exists("Assets/EasyAdMob/Scenes"))
+            {
+                Directory.CreateDirectory("Assets/EasyAdMob/Scenes");
+                AssetDatabase.Refresh();
+            }
+
+            string scenePath = "Assets/EasyAdMob/Scenes/EasyAdMobShowcase.unity";
+            var newScene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
+
+            // 1. Create AdManager instance
+            GameObject adManagerGo = CreateAdManagerInScene();
+            ApplyIDsToProjectAndScene();
+
+            // 2. Setup Canvas
+            GameObject canvasGo = new GameObject("Canvas");
+            Canvas canvas = canvasGo.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvasGo.AddComponent<CanvasScaler>();
+            canvasGo.AddComponent<GraphicRaycaster>();
+
+            // Ensure EventSystem exists
+            if (FindObjectOfType<EventSystem>() == null)
+            {
+                GameObject eventSystem = new GameObject("EventSystem");
+                eventSystem.AddComponent<EventSystem>();
+                eventSystem.AddComponent<StandaloneInputModule>();
+            }
+
+            // 3. UI Panel Layout
+            GameObject panel = new GameObject("DemoPanel");
+            panel.transform.SetParent(canvasGo.transform, false);
+            VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
+            layout.spacing = 10;
+            layout.childControlWidth = true;
+            layout.childControlHeight = false;
+            layout.childForceExpandWidth = true;
+            layout.padding = new RectOffset(40, 40, 40, 40);
+
+            RectTransform panelRect = panel.GetComponent<RectTransform>();
+            panelRect.anchorMin = new Vector2(0.2f, 0.1f);
+            panelRect.anchorMax = new Vector2(0.8f, 0.9f);
+
+            // 4. Create Buttons
+            Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
+            Component adManagerComp = adManagerGo.GetComponent(adManagerType);
+
+            CreateDemoButton(panel.transform, "Show Banner Ad", adManagerComp, "ShowBannerAd");
+            CreateDemoButton(panel.transform, "Hide Banner Ad", adManagerComp, "HideBannerAd");
+            CreateDemoButton(panel.transform, "Show Interstitial Ad", adManagerComp, "ShowInterstitialAd");
+            CreateDemoButton(panel.transform, "Show Rewarded Ad", adManagerComp, "ShowRewardedAd");
+            CreateDemoButton(panel.transform, "Show Rewarded Interstitial Ad", adManagerComp, "ShowRewardedInterstitialAd");
+
+            EditorSceneManager.SaveScene(newScene, scenePath);
+            Debug.Log($"[EasyAdMob] Created Showcase Scene at {scenePath}");
+        }
+
+        private void CreateDemoButton(Transform parent, string labelText, Component targetComponent, string methodName)
+        {
+            GameObject buttonGo = new GameObject(labelText);
+            buttonGo.transform.SetParent(parent, false);
+
+            Image img = buttonGo.AddComponent<Image>();
+            img.color = new Color(0.2f, 0.5f, 0.9f, 1f);
+
+            Button btn = buttonGo.AddComponent<Button>();
+            
+            LayoutElement layoutElement = buttonGo.AddComponent<LayoutElement>();
+            layoutElement.preferredHeight = 50;
+
+            GameObject textGo = new GameObject("Text");
+            textGo.transform.SetParent(buttonGo.transform, false);
+            Text txt = textGo.AddComponent<Text>();
+            txt.text = labelText;
+            txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            txt.alignment = TextAnchor.MiddleCenter;
+            txt.color = Color.white;
+            txt.fontSize = 18;
+
+            RectTransform textRect = textGo.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.sizeDelta = Vector2.zero;
+
+            if (targetComponent != null)
+            {
+                UnityEditor.Events.UnityEventTools.AddPersistentListener(btn.onClick, Delegate.CreateDelegate(typeof(UnityEngine.Events.UnityAction), targetComponent, methodName) as UnityEngine.Events.UnityAction);
+            }
         }
 
         private bool HasScriptingDefineSymbol()
