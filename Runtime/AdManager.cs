@@ -1,12 +1,21 @@
 using UnityEngine;
-using GoogleMobileAds.Api;
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
+    using GoogleMobileAds.Api;
+#endif
 using System;
 using System.Collections;
 
-namespace MobileAds.Package
+namespace EasyAdMob
 {
     public class AdManager : MonoBehaviour
     {
+        #if EASY_ADMOB_GOOGLE_MOBILE_ADS
+            private BannerView bannerView;
+            private InterstitialAd interstitialAd;
+            private RewardedAd rewardedAd;
+            private RewardedInterstitialAd rewardedInterstitialAd;
+        #endif
+        
         public static AdManager Instance { get; private set; }
 
         [Header("Banner Settings")]
