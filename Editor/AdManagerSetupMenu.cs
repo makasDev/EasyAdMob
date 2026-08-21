@@ -6,21 +6,21 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Networking;
 
-namespace MobileAds.Package.Editor
+namespace EasyAdMob.Editor
 {
     public class AdManagerSetupMenu : EditorWindow
     {
         private const string ADMOB_PACKAGE_URL = "https://github.com/googleads/googleads-mobile-unity/releases/download/v11.4.0/GoogleMobileAds-v11.4.0.unitypackage";
         private const string TEMP_FILE_PATH = "Temp/GoogleMobileAds.unitypackage";
-        private const string SCRIPTING_DEFINE_SYMBOL = "GOOGLE_MOBILE_ADS";
+        private const string SCRIPTING_DEFINE_SYMBOL = "EASY_ADMOB";
 
         private bool isDownloading = false;
         private float downloadProgress = 0f;
 
-        [MenuItem("Tools/Mobile Ads/Setup Wizard", false, 0)]
+        [MenuItem("Tools/EasyAdMob/Setup Wizard", false, 0)]
         public static void ShowWindow()
         {
-            var window = GetWindow<AdManagerSetupMenu>("AdManager Setup");
+            var window = GetWindow<AdManagerSetupMenu>("EasyAdMob Setup");
             window.minSize = new Vector2(400, 320);
             window.Show();
         }
@@ -28,7 +28,7 @@ namespace MobileAds.Package.Editor
         private void OnGUI()
         {
             GUILayout.Space(10);
-            EditorGUILayout.LabelField("Mobile AdManager Setup Wizard", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("EasyAdMob Setup Wizard", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Use this wizard to install Google Mobile Ads dependencies and configure the AdManager in your active scene.", MessageType.Info);
             
             GUILayout.Space(10);
@@ -113,13 +113,13 @@ namespace MobileAds.Package.Editor
 
                     if (request.result != UnityWebRequest.Result.Success)
                     {
-                        Debug.LogError($"[AdManager] Failed to download SDK: {request.error}");
+                        Debug.LogError($"[EasyAdMob] Failed to download SDK: {request.error}");
                         EditorUtility.DisplayDialog("Download Error", request.error, "OK");
                     }
                     else
                     {
                         File.WriteAllBytes(TEMP_FILE_PATH, request.downloadHandler.data);
-                        Debug.Log("[AdManager] Download finished. Unpacking package...");
+                        Debug.Log("[EasyAdMob] Download finished. Unpacking package...");
                         
                         AddScriptingDefineSymbol();
                         AssetDatabase.ImportPackage(TEMP_FILE_PATH, interactive: true);
@@ -133,8 +133,7 @@ namespace MobileAds.Package.Editor
 
         private void CreateAdManagerInScene()
         {
-            // Find existing instance or type in active scene
-            Type adManagerType = Type.GetType("MobileAds.Package.AdManager, MobileAds.Package.Runtime");
+            Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
             
             UnityEngine.Object existingInstance = null;
             if (adManagerType != null)
@@ -145,7 +144,7 @@ namespace MobileAds.Package.Editor
             if (existingInstance != null)
             {
                 Selection.activeGameObject = ((Component)existingInstance).gameObject;
-                Debug.LogWarning("[AdManager] An AdManager object already exists in this scene. Selected existing instance.");
+                Debug.LogWarning("[EasyAdMob] An AdManager object already exists in this scene. Selected existing instance.");
                 return;
             }
 
@@ -157,12 +156,12 @@ namespace MobileAds.Package.Editor
             }
             else
             {
-                Debug.LogWarning("[AdManager] AdManager runtime script was not resolved. Ensure assembly definitions compile.");
+                Debug.LogWarning("[EasyAdMob] AdManager runtime script was not resolved. Ensure assembly definitions compile.");
             }
 
             Undo.RegisterCreatedObjectUndo(go, "Create [AdManager]");
             Selection.activeGameObject = go;
-            Debug.Log("[AdManager] Created [AdManager] GameObject in current scene.");
+            Debug.Log("[EasyAdMob] Created [AdManager] GameObject in current scene.");
         }
 
         private bool HasScriptingDefineSymbol()
@@ -181,7 +180,7 @@ namespace MobileAds.Package.Editor
             {
                 string newDefines = string.IsNullOrEmpty(defines) ? SCRIPTING_DEFINE_SYMBOL : $"{defines};{SCRIPTING_DEFINE_SYMBOL}";
                 PlayerSettings.SetScriptingDefineSymbolsForGroup(targetGroup, newDefines);
-                Debug.Log($"[AdManager] Added scripting define symbol: {SCRIPTING_DEFINE_SYMBOL}");
+                Debug.Log($"[EasyAdMob] Added scripting define symbol: {SCRIPTING_DEFINE_SYMBOL}");
             }
         }
     }

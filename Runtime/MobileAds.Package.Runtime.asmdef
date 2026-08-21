@@ -1,6 +1,6 @@
 {
-    "name": "MobileAds.Package.Runtime",
-    "rootNamespace": "MobileAds.Package",
+    "name": "EasyAdMob.Runtime",
+    "rootNamespace": "EasyAdMob",
     "references": [
         "GoogleMobileAds.Core"
     ],

@@ -1,8 +1,8 @@
 {
-    "name": "MobileAds.Package.Editor",
-    "rootNamespace": "MobileAds.Package.Editor",
+    "name": "EasyAdMob.Editor",
+    "rootNamespace": "EasyAdMob.Editor",
     "references": [
-        "MobileAds.Package.Runtime"
+        "EasyAdMob.Runtime"
     ],
     "includePlatforms": [
         "Editor"

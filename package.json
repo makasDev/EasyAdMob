@@ -1,14 +1,15 @@
 {
-  "name": "com.makasDev.EasyAdMob",
+  "name": "com.makasdev.easyadmob",
   "version": "1.0.0",
-  "displayName": "Easy AdMob",
+  "displayName": "EasyAdMob",
   "description": "A simple, light wrapper to quickly load and display Google Mobile Ads (Banner, Interstitial, Rewarded).",
   "unity": "6000.0",
   "keywords": [
     "admob",
     "ads",
     "monetization",
-    "mobile"
+    "mobile",
+    "easyadmob"
   ],
   "author": {
     "name": "makasDev",
