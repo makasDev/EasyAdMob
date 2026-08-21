@@ -1,26 +1,24 @@
 using UnityEngine;
-#if EASY_ADMOB_GOOGLE_MOBILE_ADS
-    using GoogleMobileAds.Api;
-#endif
 using System;
 using System.Collections;
+
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
+using GoogleMobileAds.Api;
+#endif
 
 namespace EasyAdMob
 {
     public class AdManager : MonoBehaviour
     {
-        #if EASY_ADMOB_GOOGLE_MOBILE_ADS
-            private BannerView bannerView;
-            private InterstitialAd interstitialAd;
-            private RewardedAd rewardedAd;
-            private RewardedInterstitialAd rewardedInterstitialAd;
-        #endif
-        
         public static AdManager Instance { get; private set; }
+
+        public static event Action OnRewardedAdLoaded;
 
         [Header("Banner Settings")]
         [SerializeField] private string bannerAdUnitId = "ca-app-pub-3940256099942544/6300978111"; // Default Test ID
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
         [SerializeField] private AdPosition bannerPosition = AdPosition.Bottom;
+#endif
         [SerializeField] private bool loadBannerOnStart = false;
 
         [Header("Interstitial Settings")]
@@ -32,12 +30,12 @@ namespace EasyAdMob
         [Header("Rewarded Interstitial Settings")]
         [SerializeField] private string rewardedInterstitialAdUnitId = "ca-app-pub-3940256099942544/5354046379"; // Default Test ID
 
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
         private BannerView bannerView;
         private InterstitialAd interstitialAd;
         private RewardedAd rewardedAd;
         private RewardedInterstitialAd rewardedInterstitialAd;
-
-        public static event Action OnRewardedAdLoaded;
+#endif
 
         private void Awake()
         {
@@ -53,6 +51,7 @@ namespace EasyAdMob
 
         private IEnumerator Start()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             bool initialized = false;
             MobileAds.Initialize((InitializationStatus initStatus) => { initialized = true; });
 
@@ -66,13 +65,17 @@ namespace EasyAdMob
             LoadRewardedAd();
             LoadInterstitialAd();
             LoadRewardedInterstitialAd();
+#else
+            Debug.LogWarning("[EasyAdMob] Google Mobile Ads SDK is missing or EASY_ADMOB_GOOGLE_MOBILE_ADS symbol is not defined.");
+            yield break;
+#endif
         }
 
         // ===================== BANNER ADS =====================
 
         public void LoadBannerAd()
         {
-            // Clean up existing banner before creating a new one
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             DestroyBannerAd();
 
             AdSize adSize = AdSize.GetCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth(AdSize.FullWidth);
@@ -80,10 +83,12 @@ namespace EasyAdMob
 
             AdRequest request = new AdRequest();
             bannerView.LoadAd(request);
+#endif
         }
 
         public void ShowBannerAd()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (bannerView != null)
             {
                 bannerView.Show();
@@ -92,26 +97,32 @@ namespace EasyAdMob
             {
                 LoadBannerAd();
             }
+#endif
         }
 
         public void HideBannerAd()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             bannerView?.Hide();
+#endif
         }
 
         public void DestroyBannerAd()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (bannerView != null)
             {
                 bannerView.Destroy();
                 bannerView = null;
             }
+#endif
         }
 
         // ===================== REWARDED ADS (Standard) =====================
 
         public void LoadRewardedAd()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             AdRequest request = new AdRequest();
             RewardedAd.Load(rewardedAdUnitId, request, (RewardedAd ad, LoadAdError error) =>
             {
@@ -125,12 +136,21 @@ namespace EasyAdMob
                 OnRewardedAdLoaded?.Invoke();
                 rewardedAd.OnAdFullScreenContentClosed += () => LoadRewardedAd();
             });
+#endif
         }
 
-        public bool IsRewardedAdReady() => rewardedAd != null && rewardedAd.CanShowAd();
+        public bool IsRewardedAdReady()
+        {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
+            return rewardedAd != null && rewardedAd.CanShowAd();
+#else
+            return false;
+#endif
+        }
 
         public void ShowRewardedAd(Action onRewardSuccess)
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (IsRewardedAdReady())
             {
                 rewardedAd.Show((Reward reward) =>
@@ -144,12 +164,14 @@ namespace EasyAdMob
             {
                 LoadRewardedAd();
             }
+#endif
         }
 
         // ===================== REWARDED INTERSTITIAL ADS =====================
 
         public void LoadRewardedInterstitialAd()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             AdRequest request = new AdRequest();
             RewardedInterstitialAd.Load(rewardedInterstitialAdUnitId, request, (RewardedInterstitialAd ad, LoadAdError error) =>
             {
@@ -162,12 +184,21 @@ namespace EasyAdMob
                 rewardedInterstitialAd = ad;
                 rewardedInterstitialAd.OnAdFullScreenContentClosed += () => LoadRewardedInterstitialAd();
             });
+#endif
         }
 
-        public bool IsRewardedInterstitialAdReady() => rewardedInterstitialAd != null && rewardedInterstitialAd.CanShowAd();
+        public bool IsRewardedInterstitialAdReady()
+        {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
+            return rewardedInterstitialAd != null && rewardedInterstitialAd.CanShowAd();
+#else
+            return false;
+#endif
+        }
 
         public void ShowRewardedInterstitialAd(Action onRewardSuccess)
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (IsRewardedInterstitialAdReady())
             {
                 rewardedInterstitialAd.Show((Reward reward) =>
@@ -180,6 +211,7 @@ namespace EasyAdMob
             {
                 LoadRewardedInterstitialAd();
             }
+#endif
         }
 
         public void ShowRewardedInterstitialAd() => ShowRewardedInterstitialAd(null);
@@ -188,6 +220,7 @@ namespace EasyAdMob
 
         public void LoadInterstitialAd()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             AdRequest request = new AdRequest();
             InterstitialAd.Load(interstitialAdUnitId, request, (InterstitialAd ad, LoadAdError error) =>
             {
@@ -200,12 +233,21 @@ namespace EasyAdMob
                 interstitialAd = ad;
                 interstitialAd.OnAdFullScreenContentClosed += () => LoadInterstitialAd();
             });
+#endif
         }
 
-        public bool IsInterstitialAdReady() => interstitialAd != null && interstitialAd.CanShowAd();
+        public bool IsInterstitialAdReady()
+        {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
+            return interstitialAd != null && interstitialAd.CanShowAd();
+#else
+            return false;
+#endif
+        }
 
         public void ShowInterstitialAd()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (IsInterstitialAdReady())
             {
                 interstitialAd.Show();
@@ -215,14 +257,17 @@ namespace EasyAdMob
             {
                 LoadInterstitialAd();
             }
+#endif
         }
 
         private void OnDestroy()
         {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
             DestroyBannerAd();
             rewardedAd?.Destroy();
             interstitialAd?.Destroy();
             rewardedInterstitialAd?.Destroy();
+#endif
         }
     }
 }
