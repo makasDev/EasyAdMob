@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -12,7 +13,7 @@ namespace EasyAdMob.Editor
     {
         private const string ADMOB_PACKAGE_URL = "https://github.com/googleads/googleads-mobile-unity/releases/download/v11.4.0/GoogleMobileAds-v11.4.0.unitypackage";
         private const string TEMP_FILE_PATH = "Temp/GoogleMobileAds.unitypackage";
-        private const string SCRIPTING_DEFINE_SYMBOL = "EASY_ADMOB";
+        private const string SCRIPTING_DEFINE_SYMBOL = "EASY_ADMOB_GOOGLE_MOBILE_ADS";
 
         private bool isDownloading = false;
         private float downloadProgress = 0f;
@@ -87,7 +88,7 @@ namespace EasyAdMob.Editor
         private bool CheckAdMobInstalled()
         {
             return AppDomain.CurrentDomain.GetAssemblies()
-                .Any(a => a.GetName().Name == "GoogleMobileAds.Core");
+                .Any(a => a.GetName().Name == "GoogleMobileAds.Core" || a.GetName().Name == "GoogleMobileAds");
         }
 
         private void DownloadAndInstallAdMob()
@@ -166,20 +167,20 @@ namespace EasyAdMob.Editor
 
         private bool HasScriptingDefineSymbol()
         {
-            BuildTargetGroup targetGroup = EditorUserBuildSettings.selectedBuildTargetGroup;
-            string defines = PlayerSettings.GetScriptingDefineSymbolsForGroup(targetGroup);
-            return defines.Split(';').Contains(SCRIPTING_DEFINE_SYMBOL);
+            NamedBuildTarget buildTarget = NamedBuildTarget.FromBuildTargetGroup(EditorUserBuildSettings.selectedBuildTargetGroup);
+            PlayerSettings.GetScriptingDefineSymbols(buildTarget, out string[] defines);
+            return defines.Contains(SCRIPTING_DEFINE_SYMBOL);
         }
 
         private static void AddScriptingDefineSymbol()
         {
-            BuildTargetGroup targetGroup = EditorUserBuildSettings.selectedBuildTargetGroup;
-            string defines = PlayerSettings.GetScriptingDefineSymbolsForGroup(targetGroup);
+            NamedBuildTarget buildTarget = NamedBuildTarget.FromBuildTargetGroup(EditorUserBuildSettings.selectedBuildTargetGroup);
+            PlayerSettings.GetScriptingDefineSymbols(buildTarget, out string[] defines);
 
-            if (!defines.Split(';').Contains(SCRIPTING_DEFINE_SYMBOL))
+            if (!defines.Contains(SCRIPTING_DEFINE_SYMBOL))
             {
-                string newDefines = string.IsNullOrEmpty(defines) ? SCRIPTING_DEFINE_SYMBOL : $"{defines};{SCRIPTING_DEFINE_SYMBOL}";
-                PlayerSettings.SetScriptingDefineSymbolsForGroup(targetGroup, newDefines);
+                string[] newDefines = defines.Append(SCRIPTING_DEFINE_SYMBOL).ToArray();
+                PlayerSettings.SetScriptingDefineSymbols(buildTarget, newDefines);
                 Debug.Log($"[EasyAdMob] Added scripting define symbol: {SCRIPTING_DEFINE_SYMBOL}");
             }
         }
