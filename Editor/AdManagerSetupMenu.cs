@@ -39,12 +39,15 @@ namespace EasyAdMob.Editor
         public static void ShowWindow()
         {
             var window = GetWindow<AdManagerSetupMenu>("EasyAdMob Setup");
-            window.minSize = new Vector2(420, 560);
+            window.minSize = new Vector2(440, 560);
             window.Show();
         }
 
         private void OnGUI()
         {
+            float originalLabelWidth = EditorGUIUtility.labelWidth;
+            EditorGUIUtility.labelWidth = 150f; // Fix field label clipping
+
             GUILayout.Space(10);
             EditorGUILayout.LabelField("EasyAdMob Setup Wizard", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Use this wizard to install dependencies, configure App/Ad IDs, and setup AdManager in your active scene.", MessageType.Info);
@@ -66,7 +69,7 @@ namespace EasyAdMob.Editor
                 EditorGUILayout.HelpBox("Google Mobile Ads SDK not detected.", MessageType.Warning);
                 
                 GUI.enabled = !isDownloading;
-                if (GUILayout.Button(isDownloading ? $"Downloading ({downloadProgress * 100:F0}%)..." : "Download & Install Google Mobile Ads", GUILayout.Height(28)))
+                if (GUILayout.Button(isDownloading ? $"Downloading ({downloadProgress * 100:F0}%)..." : "Download & Install Google Mobile Ads", GUILayout.Height(30)))
                 {
                     DownloadAndInstallAdMob();
                 }
@@ -74,7 +77,7 @@ namespace EasyAdMob.Editor
             }
 
             bool hasDefine = HasScriptingDefineSymbol();
-            if (!hasDefine && GUILayout.Button("Add Scripting Define Symbol"))
+            if (!hasDefine && GUILayout.Button("Add Scripting Define Symbol", GUILayout.Height(30)))
             {
                 AddScriptingDefineSymbol();
             }
@@ -85,30 +88,34 @@ namespace EasyAdMob.Editor
             // --- STEP 2: ID CONFIGURATION ---
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Step 2: App & Ad Unit IDs", EditorStyles.boldLabel);
-            
+            GUILayout.Space(4);
+
             EditorGUILayout.LabelField("Google Mobile Ads App IDs", EditorStyles.miniBoldLabel);
             androidAppId = EditorGUILayout.TextField("Android App ID", androidAppId);
             iosAppId = EditorGUILayout.TextField("iOS App ID", iosAppId);
 
-            GUILayout.Space(5);
+            GUILayout.Space(6);
             EditorGUILayout.LabelField("Ad Unit IDs", EditorStyles.miniBoldLabel);
             bannerId = EditorGUILayout.TextField("Banner ID", bannerId);
             interstitialId = EditorGUILayout.TextField("Interstitial ID", interstitialId);
             rewardedId = EditorGUILayout.TextField("Rewarded ID", rewardedId);
             rewardedInterstitialId = EditorGUILayout.TextField("Rewarded Interstitial ID", rewardedInterstitialId);
 
-            GUILayout.Space(8);
+            GUILayout.Space(10);
+
+            // Button Row - Uniform Heights and Padding
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Fill Test IDs"))
+            if (GUILayout.Button("Fill Test IDs", GUILayout.Height(30)))
             {
                 FillTestIDs();
             }
 
-            if (GUILayout.Button("Apply IDs to Project & Scene", GUILayout.Height(28)))
+            if (GUILayout.Button("Apply IDs to Project & Scene", GUILayout.Height(30)))
             {
                 ApplyIDsToProjectAndScene();
             }
             EditorGUILayout.EndHorizontal();
+            
             EditorGUILayout.EndVertical();
 
             GUILayout.Space(10);
@@ -116,13 +123,16 @@ namespace EasyAdMob.Editor
             // --- STEP 3: SCENE SETUP ---
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Step 3: Scene Setup", EditorStyles.boldLabel);
+            GUILayout.Space(4);
 
-            if (GUILayout.Button("Create [AdManager] in Active Scene", GUILayout.Height(28)))
+            if (GUILayout.Button("Create [AdManager] in Active Scene", GUILayout.Height(30)))
             {
                 CreateAdManagerInScene();
                 ApplyIDsToProjectAndScene();
             }
             EditorGUILayout.EndVertical();
+
+            EditorGUIUtility.labelWidth = originalLabelWidth;
         }
 
         private void FillTestIDs()
