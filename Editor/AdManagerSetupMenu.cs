@@ -139,7 +139,7 @@ namespace EasyAdMob.Editor
 
             if (GUILayout.Button("Generate Showcase Demo Scene", GUILayout.Height(30)))
             {
-                // Defers scene creation to the next Editor frame to safely exit OnGUI() layout
+                // Execute outside OnGUI pass to prevent GUILayout frame mismatch errors
                 EditorApplication.delayCall += () => GenerateShowcaseScene();
             }
             EditorGUILayout.EndVertical();
@@ -317,9 +317,15 @@ namespace EasyAdMob.Editor
             string scenePath = "Assets/EasyAdMob/Scenes/EasyAdMobShowcase.unity";
             var newScene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
 
-            // 1. Create AdManager instance
+            // 1. Create AdManager instance & attach runtime showcase helper
             GameObject adManagerGo = CreateAdManagerInScene();
             ApplyIDsToProjectAndScene();
+
+            EasyAdMobShowcaseUI showcaseHelper = adManagerGo.GetComponent<EasyAdMobShowcaseUI>();
+            if (showcaseHelper == null)
+            {
+                showcaseHelper = adManagerGo.AddComponent<EasyAdMobShowcaseUI>();
+            }
 
             // 2. Setup Canvas
             GameObject canvasGo = new GameObject("Canvas");
@@ -328,14 +334,24 @@ namespace EasyAdMob.Editor
             canvasGo.AddComponent<CanvasScaler>();
             canvasGo.AddComponent<GraphicRaycaster>();
 
+            // 3. Setup EventSystem with New Input System check
             if (FindObjectOfType<EventSystem>() == null)
             {
                 GameObject eventSystem = new GameObject("EventSystem");
                 eventSystem.AddComponent<EventSystem>();
-                eventSystem.AddComponent<StandaloneInputModule>();
+
+                Type inputSystemModuleType = Type.GetType("UnityEngine.InputSystem.UI.InputSystemUIInputModule, Unity.InputSystem");
+                if (inputSystemModuleType != null)
+                {
+                    eventSystem.AddComponent(inputSystemModuleType);
+                }
+                else
+                {
+                    eventSystem.AddComponent<StandaloneInputModule>();
+                }
             }
 
-            // 3. UI Panel Layout
+            // 4. UI Panel Layout
             GameObject panel = new GameObject("DemoPanel");
             panel.transform.SetParent(canvasGo.transform, false);
             VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
@@ -349,18 +365,12 @@ namespace EasyAdMob.Editor
             panelRect.anchorMin = new Vector2(0.2f, 0.1f);
             panelRect.anchorMax = new Vector2(0.8f, 0.9f);
 
-            // 4. Create Buttons targeting AdManager direct methods
-            Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
-            Component adManagerComp = adManagerGo.GetComponent(adManagerType);
-
-            if (adManagerComp != null)
-            {
-                CreateDemoButton(panel.transform, "Show Banner Ad", adManagerComp, "ShowBannerAd");
-                CreateDemoButton(panel.transform, "Hide Banner Ad", adManagerComp, "HideBannerAd");
-                CreateDemoButton(panel.transform, "Show Interstitial Ad", adManagerComp, "ShowInterstitialAd");
-                CreateDemoButton(panel.transform, "Show Rewarded Ad", adManagerComp, "ShowRewardedAd");
-                CreateDemoButton(panel.transform, "Show Rewarded Interstitial Ad", adManagerComp, "ShowRewardedInterstitialAd");
-            }
+            // 5. Create Buttons targeting EasyAdMobShowcaseUI methods
+            CreateDemoButton(panel.transform, "Show Banner Ad", showcaseHelper, nameof(EasyAdMobShowcaseUI.ShowBanner));
+            CreateDemoButton(panel.transform, "Hide Banner Ad", showcaseHelper, nameof(EasyAdMobShowcaseUI.HideBanner));
+            CreateDemoButton(panel.transform, "Show Interstitial Ad", showcaseHelper, nameof(EasyAdMobShowcaseUI.ShowInterstitial));
+            CreateDemoButton(panel.transform, "Show Rewarded Ad", showcaseHelper, nameof(EasyAdMobShowcaseUI.ShowRewarded));
+            CreateDemoButton(panel.transform, "Show Rewarded Interstitial Ad", showcaseHelper, nameof(EasyAdMobShowcaseUI.ShowRewardedInterstitial));
 
             EditorSceneManager.SaveScene(newScene, scenePath);
             Debug.Log($"[EasyAdMob] Successfully created Showcase Scene at {scenePath}");
@@ -393,7 +403,6 @@ namespace EasyAdMob.Editor
             textRect.anchorMax = Vector2.one;
             textRect.sizeDelta = Vector2.zero;
 
-            // Target parameterless methods specifically to avoid delegate binding errors on overloaded methods
             MethodInfo method = targetComponent.GetType()
                 .GetMethods(BindingFlags.Instance | BindingFlags.Public)
                 .FirstOrDefault(m => m.Name == methodName && m.GetParameters().Length == 0);
@@ -428,6 +437,78 @@ namespace EasyAdMob.Editor
                 Debug.Log($"[EasyAdMob] Added scripting define symbol: {SCRIPTING_DEFINE_SYMBOL}");
             }
         }
+    }
+}
+
+// Runtime component attached automatically to [AdManager] during scene generation
+public class EasyAdMobShowcaseUI : MonoBehaviour
+{
+    public void ShowBanner() => InvokeAdManagerMethod("ShowBannerAd");
+    public void HideBanner() => InvokeAdManagerMethod("HideBannerAd");
+    public void ShowInterstitial() => InvokeAdManagerMethod("ShowInterstitialAd");
+
+    public void ShowRewarded()
+    {
+        InvokeAdManagerRewardedMethod("ShowRewardedAd");
+    }
+
+    public void ShowRewardedInterstitial()
+    {
+        InvokeAdManagerRewardedMethod("ShowRewardedInterstitialAd");
+    }
+
+    private void InvokeAdManagerMethod(string methodName)
+    {
+        Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
+        if (adManagerType != null)
+        {
+            var instance = FindObjectOfType(adManagerType);
+            if (instance != null)
+            {
+                MethodInfo method = adManagerType.GetMethods().FirstOrDefault(m => m.Name == methodName && m.GetParameters().Length == 0);
+                method?.Invoke(instance, null);
+            }
+        }
+    }
+
+    private void InvokeAdManagerRewardedMethod(string methodName)
+    {
+        Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
+        if (adManagerType != null)
+        {
+            var instance = FindObjectOfType(adManagerType);
+            if (instance != null)
+            {
+                MethodInfo method = adManagerType.GetMethods().FirstOrDefault(m => m.Name == methodName);
+                if (method != null)
+                {
+                    ParameterInfo[] parameters = method.GetParameters();
+                    if (parameters.Length == 0)
+                    {
+                        method.Invoke(instance, null);
+                    }
+                    else if (parameters.Length == 1)
+                    {
+                        Type paramType = parameters[0].ParameterType;
+                        object callback = null;
+
+                        if (paramType.IsGenericType && paramType.GetGenericTypeDefinition() == typeof(Action<>))
+                        {
+                            Type rewardType = paramType.GetGenericArguments()[0];
+                            MethodInfo dummyMethod = typeof(EasyAdMobShowcaseUI).GetMethod(nameof(OnRewardReceived), BindingFlags.NonPublic | BindingFlags.Instance).MakeGenericMethod(rewardType);
+                            callback = Delegate.CreateDelegate(paramType, this, dummyMethod);
+                        }
+
+                        method.Invoke(instance, new object[] { callback });
+                    }
+                }
+            }
+        }
+    }
+
+    private void OnRewardReceived<T>(T reward)
+    {
+        Debug.Log($"[EasyAdMob Showcase] Reward earned: {reward}");
     }
 }
 #endif
