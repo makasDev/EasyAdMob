@@ -21,7 +21,6 @@ namespace EasyAdMob.Editor
         private const string TEMP_FILE_PATH = "Temp/GoogleMobileAds.unitypackage";
         private const string SCRIPTING_DEFINE_SYMBOL = "EASY_ADMOB_GOOGLE_MOBILE_ADS";
 
-        // --- OFFICIAL TEST IDS ---
         private const string TEST_ANDROID_APP_ID = "ca-app-pub-3940256099942544~3347511713";
         private const string TEST_IOS_APP_ID = "ca-app-pub-3940256099942544~1458002511";
         private const string TEST_BANNER_ID = "ca-app-pub-3940256099942544/6300978111";
@@ -32,7 +31,6 @@ namespace EasyAdMob.Editor
         private bool isDownloading = false;
         private float downloadProgress = 0f;
 
-        // --- ID FIELDS ---
         private string androidAppId = TEST_ANDROID_APP_ID;
         private string iosAppId = TEST_IOS_APP_ID;
         private string bannerId = TEST_BANNER_ID;
@@ -59,7 +57,6 @@ namespace EasyAdMob.Editor
             
             GUILayout.Space(10);
 
-            // --- STEP 1: DEPENDENCIES ---
             bool hasAdMobAssembly = CheckAdMobInstalled();
             
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
@@ -90,7 +87,6 @@ namespace EasyAdMob.Editor
 
             GUILayout.Space(10);
 
-            // --- STEP 2: ID CONFIGURATION ---
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Step 2: App & Ad Unit IDs", EditorStyles.boldLabel);
             GUILayout.Space(4);
@@ -124,7 +120,6 @@ namespace EasyAdMob.Editor
 
             GUILayout.Space(10);
 
-            // --- STEP 3: SCENE SETUP ---
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Step 3: Scene Setup", EditorStyles.boldLabel);
             GUILayout.Space(4);
@@ -139,7 +134,6 @@ namespace EasyAdMob.Editor
 
             if (GUILayout.Button("Generate Showcase Demo Scene", GUILayout.Height(30)))
             {
-                // Execute outside OnGUI pass to prevent GUILayout frame mismatch errors
                 EditorApplication.delayCall += () => GenerateShowcaseScene();
             }
             EditorGUILayout.EndVertical();
@@ -251,7 +245,7 @@ namespace EasyAdMob.Editor
             Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
             if (adManagerType != null)
             {
-                UnityEngine.Object adManagerObj = FindObjectOfType(adManagerType);
+                UnityEngine.Object adManagerObj = FindObjectOfTypeCustom(adManagerType);
                 if (adManagerObj != null)
                 {
                     SerializedObject serializedAdManager = new SerializedObject(adManagerObj);
@@ -284,7 +278,7 @@ namespace EasyAdMob.Editor
             UnityEngine.Object existingInstance = null;
             if (adManagerType != null)
             {
-                existingInstance = FindObjectOfType(adManagerType);
+                existingInstance = FindObjectOfTypeCustom(adManagerType);
             }
 
             if (existingInstance != null)
@@ -317,25 +311,23 @@ namespace EasyAdMob.Editor
             string scenePath = "Assets/EasyAdMob/Scenes/EasyAdMobShowcase.unity";
             var newScene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
 
-            // 1. Create AdManager instance & attach runtime showcase helper
             GameObject adManagerGo = CreateAdManagerInScene();
             ApplyIDsToProjectAndScene();
 
-            EasyAdMobShowcaseUI showcaseHelper = adManagerGo.GetComponent<EasyAdMobShowcaseUI>();
+            Type showcaseType = Type.GetType("EasyAdMob.EasyAdMobShowcaseUI, EasyAdMob.Runtime") ?? typeof(EasyAdMobShowcaseUI);
+            Component showcaseHelper = adManagerGo.GetComponent(showcaseType);
             if (showcaseHelper == null)
             {
-                showcaseHelper = adManagerGo.AddComponent<EasyAdMobShowcaseUI>();
+                showcaseHelper = adManagerGo.AddComponent(showcaseType);
             }
 
-            // 2. Setup Canvas
             GameObject canvasGo = new GameObject("Canvas");
             Canvas canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvasGo.AddComponent<CanvasScaler>();
             canvasGo.AddComponent<GraphicRaycaster>();
 
-            // 3. Setup EventSystem with New Input System check
-            if (FindObjectOfType<EventSystem>() == null)
+            if (FindObjectOfTypeCustom(typeof(EventSystem)) == null)
             {
                 GameObject eventSystem = new GameObject("EventSystem");
                 eventSystem.AddComponent<EventSystem>();
@@ -351,7 +343,6 @@ namespace EasyAdMob.Editor
                 }
             }
 
-            // 4. UI Panel Layout
             GameObject panel = new GameObject("DemoPanel");
             panel.transform.SetParent(canvasGo.transform, false);
             VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
@@ -365,7 +356,6 @@ namespace EasyAdMob.Editor
             panelRect.anchorMin = new Vector2(0.2f, 0.1f);
             panelRect.anchorMax = new Vector2(0.8f, 0.9f);
 
-            // 5. Create Buttons targeting EasyAdMobShowcaseUI methods
             CreateDemoButton(panel.transform, "Show Banner Ad", showcaseHelper, nameof(EasyAdMobShowcaseUI.ShowBanner));
             CreateDemoButton(panel.transform, "Hide Banner Ad", showcaseHelper, nameof(EasyAdMobShowcaseUI.HideBanner));
             CreateDemoButton(panel.transform, "Show Interstitial Ad", showcaseHelper, nameof(EasyAdMobShowcaseUI.ShowInterstitial));
@@ -418,6 +408,15 @@ namespace EasyAdMob.Editor
             }
         }
 
+        private static UnityEngine.Object FindObjectOfTypeCustom(Type type)
+        {
+#if UNITY_2023_1_OR_NEWER
+            return FindAnyObjectByType(type);
+#else
+            return FindObjectOfType(type);
+#endif
+        }
+
         private bool HasScriptingDefineSymbol()
         {
             NamedBuildTarget buildTarget = NamedBuildTarget.FromBuildTargetGroup(EditorUserBuildSettings.selectedBuildTargetGroup);
@@ -437,78 +436,6 @@ namespace EasyAdMob.Editor
                 Debug.Log($"[EasyAdMob] Added scripting define symbol: {SCRIPTING_DEFINE_SYMBOL}");
             }
         }
-    }
-}
-
-// Runtime component attached automatically to [AdManager] during scene generation
-public class EasyAdMobShowcaseUI : MonoBehaviour
-{
-    public void ShowBanner() => InvokeAdManagerMethod("ShowBannerAd");
-    public void HideBanner() => InvokeAdManagerMethod("HideBannerAd");
-    public void ShowInterstitial() => InvokeAdManagerMethod("ShowInterstitialAd");
-
-    public void ShowRewarded()
-    {
-        InvokeAdManagerRewardedMethod("ShowRewardedAd");
-    }
-
-    public void ShowRewardedInterstitial()
-    {
-        InvokeAdManagerRewardedMethod("ShowRewardedInterstitialAd");
-    }
-
-    private void InvokeAdManagerMethod(string methodName)
-    {
-        Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
-        if (adManagerType != null)
-        {
-            var instance = FindObjectOfType(adManagerType);
-            if (instance != null)
-            {
-                MethodInfo method = adManagerType.GetMethods().FirstOrDefault(m => m.Name == methodName && m.GetParameters().Length == 0);
-                method?.Invoke(instance, null);
-            }
-        }
-    }
-
-    private void InvokeAdManagerRewardedMethod(string methodName)
-    {
-        Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
-        if (adManagerType != null)
-        {
-            var instance = FindObjectOfType(adManagerType);
-            if (instance != null)
-            {
-                MethodInfo method = adManagerType.GetMethods().FirstOrDefault(m => m.Name == methodName);
-                if (method != null)
-                {
-                    ParameterInfo[] parameters = method.GetParameters();
-                    if (parameters.Length == 0)
-                    {
-                        method.Invoke(instance, null);
-                    }
-                    else if (parameters.Length == 1)
-                    {
-                        Type paramType = parameters[0].ParameterType;
-                        object callback = null;
-
-                        if (paramType.IsGenericType && paramType.GetGenericTypeDefinition() == typeof(Action<>))
-                        {
-                            Type rewardType = paramType.GetGenericArguments()[0];
-                            MethodInfo dummyMethod = typeof(EasyAdMobShowcaseUI).GetMethod(nameof(OnRewardReceived), BindingFlags.NonPublic | BindingFlags.Instance).MakeGenericMethod(rewardType);
-                            callback = Delegate.CreateDelegate(paramType, this, dummyMethod);
-                        }
-
-                        method.Invoke(instance, new object[] { callback });
-                    }
-                }
-            }
-        }
-    }
-
-    private void OnRewardReceived<T>(T reward)
-    {
-        Debug.Log($"[EasyAdMob Showcase] Reward earned: {reward}");
     }
 }
 #endif
