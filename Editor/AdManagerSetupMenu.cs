@@ -93,6 +93,15 @@ namespace EasyAdMob.Editor
             LoadPersistedIds();
         }
 
+        private void OnDisable()
+        {
+            // Defensive flush: guarantees whatever is currently in the in-memory fields is
+            // written out when the window closes, loses focus during an assembly reload, or
+            // Unity itself is closing - so a save is never dependent purely on the last
+            // keystroke's EndChangeCheck() having fired.
+            SavePersistedIds();
+        }
+
         private void OnGUI()
         {
             float originalLabelWidth = EditorGUIUtility.labelWidth;
@@ -250,7 +259,16 @@ namespace EasyAdMob.Editor
                 style = EditorStyles.textField;
             }
 
+            // BeginChangeCheck/EndChangeCheck is the correct way to detect "the user actually
+            // changed this control" in IMGUI. Comparing the returned string to the old one
+            // directly is unreliable here: OnGUI runs multiple passes per frame (Layout,
+            // Repaint, mouse-move repaints, etc.) and can re-enter with stale arguments,
+            // so a plain "newValue != currentValue" check can both mis-fire and, worse,
+            // silently no-op on real edits depending on which pass happens to call this.
+            // That mismatch is what was making saving feel inconsistent.
+            EditorGUI.BeginChangeCheck();
             string newValue = EditorGUILayout.TextField(label, currentValue, style);
+            bool changed = EditorGUI.EndChangeCheck();
 
             if (!isCustom)
             {
@@ -271,22 +289,22 @@ namespace EasyAdMob.Editor
                 EditorGUILayout.HelpBox($"Doesn't look like a valid {(kind == IdKind.AppId ? "App ID" : "Ad Unit ID")}. Expected format: {expected}", MessageType.Warning);
             }
 
-            if (newValue != currentValue)
+            if (!changed)
             {
-                if (string.IsNullOrEmpty(newValue) || newValue == testValue)
-                {
-                    // user cleared it or retyped the test id manually -> revert to test/placeholder state
-                    isCustom = false;
-                    SavePersistedIds();
-                    return testValue;
-                }
-
-                isCustom = true;
-                SavePersistedIds();
-                return newValue;
+                return currentValue;
             }
 
-            return currentValue;
+            if (string.IsNullOrEmpty(newValue) || newValue == testValue)
+            {
+                // user cleared it or retyped the test id manually -> revert to test/placeholder state
+                isCustom = false;
+                SavePersistedIds();
+                return testValue;
+            }
+
+            isCustom = true;
+            SavePersistedIds();
+            return newValue;
         }
 
         private void TryFillTestIDs()
