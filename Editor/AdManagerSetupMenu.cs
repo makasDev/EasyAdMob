@@ -164,32 +164,13 @@ namespace EasyAdMob.Editor
 
                 if (GUILayout.Button("Switch to Next-Gen Android SDK", GUILayout.Height(30)))
                 {
-                    Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
-                                           ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
-                    UnityEngine.Object settingsInstance = googleSettingsType != null ? Resources.Load("GoogleMobileAdsSettings") : null;
-
-                    if (settingsInstance == null || googleSettingsType == null)
-                    {
-                        Debug.LogWarning("[EasyAdMob] Could not switch Android SDK architecture: GoogleMobileAdsSettings asset not found. Open 'Assets > Google Mobile Ads > Settings' once to create it.");
-                        EditorUtility.DisplayDialog("GoogleMobileAdsSettings Not Found", "Open 'Assets > Google Mobile Ads > Settings' once to create the settings asset, then try again.", "OK");
-                    }
-                    else
-                    {
-                        bool confirmSwitch = EditorUtility.DisplayDialog(
-                            "Switch to Next-Gen Android SDK?",
-                            "This switches your project's Google Mobile Ads Android architecture to the Next-Gen SDK. This requires minimum API level 24+. You can switch back to the standard SDK at any time from Assets > Google Mobile Ads > Settings.",
-                            "Switch",
-                            "Cancel");
-
-                        if (confirmSwitch)
-                        {
-                            TrySwitchToNextGenAndroidSdk(settingsInstance, googleSettingsType);
-                        }
-                        else
-                        {
-                            Debug.Log("[EasyAdMob] Next-Gen Android SDK switch cancelled by user.");
-                        }
-                    }
+                    // Deferred: EditorUtility.DisplayDialog runs its own modal loop, and firing
+                    // it directly inside a button's if-block (itself nested in BeginVertical)
+                    // can desync IMGUI's layout stack for this OnGUI pass, producing a spurious
+                    // "EndLayoutGroup: BeginLayoutGroup must be called first" warning. Deferring
+                    // with delayCall lets this OnGUI call finish and unwind its layout groups
+                    // cleanly first, then shows the dialog on the next editor tick.
+                    EditorApplication.delayCall += TrySwitchToNextGenAndroidSdkFromButton;
                 }
             }
             EditorGUILayout.EndVertical();
@@ -216,12 +197,15 @@ namespace EasyAdMob.Editor
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Fill Test IDs", GUILayout.Height(30)))
             {
-                TryFillTestIDs();
+                // Deferred for the same reason as the Next-Gen SDK button: TryFillTestIDs() can
+                // show a confirmation dialog, and doing that while still inside this
+                // BeginHorizontal/BeginVertical pair desyncs IMGUI's layout stack for this frame.
+                EditorApplication.delayCall += TryFillTestIDs;
             }
 
             if (GUILayout.Button("Apply IDs to Project & Scene", GUILayout.Height(30)))
             {
-                TryApplyIDsToProjectAndScene();
+                EditorApplication.delayCall += TryApplyIDsToProjectAndScene;
             }
             EditorGUILayout.EndHorizontal();
             
@@ -235,8 +219,13 @@ namespace EasyAdMob.Editor
 
             if (GUILayout.Button("Create [AdManager] in Active Scene", GUILayout.Height(30)))
             {
-                CreateAdManagerInScene();
-                TryApplyIDsToProjectAndScene();
+                // Deferred: TryApplyIDsToProjectAndScene() can show the invalid-ID dialog, which
+                // caused this exact button to trigger the layout warning before this fix.
+                EditorApplication.delayCall += () =>
+                {
+                    CreateAdManagerInScene();
+                    TryApplyIDsToProjectAndScene();
+                };
             }
 
             GUILayout.Space(4);
@@ -778,6 +767,42 @@ namespace EasyAdMob.Editor
         // for NextGen are now known for certain rather than guessed, so plain reflection on the
         // public properties is safe and doesn't need SerializedObject/enum-name matching at all.
         private const int GMA_ANDROID_SDK_NEXT_GEN = 1;
+
+        /// <summary>
+        /// Entry point for the "Switch to Next-Gen Android SDK" button. Called via
+        /// EditorApplication.delayCall rather than directly inside the button's if-block, since
+        /// this shows EditorUtility.DisplayDialog and doing that mid-layout (nested inside
+        /// Step 2's BeginVertical) is what causes the "EndLayoutGroup: BeginLayoutGroup must be
+        /// called first" console warning on this window.
+        /// </summary>
+        private void TrySwitchToNextGenAndroidSdkFromButton()
+        {
+            Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
+                                   ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
+            UnityEngine.Object settingsInstance = googleSettingsType != null ? Resources.Load("GoogleMobileAdsSettings") : null;
+
+            if (settingsInstance == null || googleSettingsType == null)
+            {
+                Debug.LogWarning("[EasyAdMob] Could not switch Android SDK architecture: GoogleMobileAdsSettings asset not found. Open 'Assets > Google Mobile Ads > Settings' once to create it.");
+                EditorUtility.DisplayDialog("GoogleMobileAdsSettings Not Found", "Open 'Assets > Google Mobile Ads > Settings' once to create the settings asset, then try again.", "OK");
+                return;
+            }
+
+            bool confirmSwitch = EditorUtility.DisplayDialog(
+                "Switch to Next-Gen Android SDK?",
+                "This switches your project's Google Mobile Ads Android architecture to the Next-Gen SDK. This requires minimum API level 24+. You can switch back to the standard SDK at any time from Assets > Google Mobile Ads > Settings.",
+                "Switch",
+                "Cancel");
+
+            if (confirmSwitch)
+            {
+                TrySwitchToNextGenAndroidSdk(settingsInstance, googleSettingsType);
+            }
+            else
+            {
+                Debug.Log("[EasyAdMob] Next-Gen Android SDK switch cancelled by user.");
+            }
+        }
 
         /// <summary>
         /// Switches the project to the GMA Next-Gen Android SDK architecture by setting
