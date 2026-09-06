@@ -148,15 +148,31 @@ namespace EasyAdMob
 #endif
         }
 
+        // NOTE: onRewardSuccess is now invoked from OnAdFullScreenContentClosed,
+        // not from the Show() reward callback. On current GMA versions the reward
+        // callback can fire several seconds before the user actually dismisses the
+        // ad (taps the X), so any gameplay logic gated on it was running while the
+        // ad was still on screen. Gating on close instead makes sure game state
+        // only changes once the player is actually back looking at the game.
         public void ShowRewardedAd(Action onRewardSuccess)
         {
 #if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (IsRewardedAdReady())
             {
+                bool rewardGranted = false;
+
+                rewardedAd.OnAdFullScreenContentClosed += () =>
+                {
+                    if (rewardGranted)
+                    {
+                        onRewardSuccess?.Invoke();
+                    }
+                };
+
                 rewardedAd.Show((Reward reward) =>
                 {
                     Debug.Log($"[AdManager] Reward earned: {reward.Type}");
-                    onRewardSuccess?.Invoke();
+                    rewardGranted = true; // record it, act on close instead
                 });
                 rewardedAd = null;
             }
@@ -196,14 +212,26 @@ namespace EasyAdMob
 #endif
         }
 
+        // Same fix as ShowRewardedAd: gate onRewardSuccess on OnAdFullScreenContentClosed
+        // instead of the Show() reward callback.
         public void ShowRewardedInterstitialAd(Action onRewardSuccess)
         {
 #if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (IsRewardedInterstitialAdReady())
             {
+                bool rewardGranted = false;
+
+                rewardedInterstitialAd.OnAdFullScreenContentClosed += () =>
+                {
+                    if (rewardGranted)
+                    {
+                        onRewardSuccess?.Invoke();
+                    }
+                };
+
                 rewardedInterstitialAd.Show((Reward reward) =>
                 {
-                    onRewardSuccess?.Invoke();
+                    rewardGranted = true;
                 });
                 rewardedInterstitialAd = null;
             }
