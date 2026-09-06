@@ -12,6 +12,7 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.EventSystems;
 using UnityEngine.Networking;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace EasyAdMob.Editor
@@ -538,21 +539,153 @@ namespace EasyAdMob.Editor
             Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
             if (adManagerType != null)
             {
-                UnityEngine.Object adManagerObj = FindObjectOfTypeCustom(adManagerType);
-                if (adManagerObj != null)
+                ApplyAdUnitIdsAcrossAllScenes(adManagerType);
+            }
+        }
+
+        /// <summary>
+        /// Finds every [AdManager] across every scene registered in Build Settings and applies
+        /// the current Ad Unit IDs to each one - not just whatever scene happens to be open.
+        ///
+        /// Scenes not in Build Settings are intentionally skipped: those won't ship in the
+        /// build anyway, and scanning literally every .unity file under Assets/ (including old
+        /// test scenes, backups, etc.) risks touching things the user never intended to touch.
+        /// If a scene needs its AdManager updated, it needs to be in Build Settings first.
+        ///
+        /// The currently open scene(s) and their dirty state are preserved: any scene opened
+        /// here purely to apply IDs is opened additively and closed again afterward, and the
+        /// scene the user started in is never force-saved.
+        /// </summary>
+        private void ApplyAdUnitIdsAcrossAllScenes(Type adManagerType)
+        {
+            EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
+            if (buildScenes == null || buildScenes.Length == 0)
+            {
+                Debug.LogWarning("[EasyAdMob] No scenes found in Build Settings. Add your scenes there so the wizard knows which ones to update.");
+                return;
+            }
+
+            // Remember what was open before we start, so we can restore it exactly afterward.
+            string originalSetupPath = EditorSceneManager.GetActiveScene().path;
+            var originallyOpenScenePaths = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < EditorSceneManager.sceneCount; i++)
+            {
+                var openScene = EditorSceneManager.GetSceneAt(i);
+                if (openScene.isLoaded)
                 {
-                    SerializedObject serializedAdManager = new SerializedObject(adManagerObj);
+                    originallyOpenScenePaths.Add(openScene.path);
+                }
+            }
+
+            // If anything in the currently open scene(s) is unsaved, ask first - opening/closing
+            // other scenes additively is safe, but we don't want to surprise the user by
+            // touching scene state while they have unrelated unsaved edits sitting around.
+            if (EditorSceneManager.GetActiveScene().isDirty || AnyOpenSceneIsDirty())
+            {
+                bool proceed = EditorUtility.DisplayDialog(
+                    "Unsaved Scene Changes",
+                    "You have unsaved changes in your currently open scene(s). Applying IDs across all scenes will open and close other scenes in the editor. Save your current scene(s) first to avoid confusion.",
+                    "Continue Anyway",
+                    "Cancel");
+
+                if (!proceed)
+                {
+                    return;
+                }
+            }
+
+            int updatedCount = 0;
+            int scannedCount = 0;
+
+            foreach (EditorBuildSettingsScene buildScene in buildScenes)
+            {
+                if (buildScene == null || string.IsNullOrEmpty(buildScene.path) || !buildScene.enabled)
+                {
+                    continue;
+                }
+
+                if (!File.Exists(buildScene.path))
+                {
+                    Debug.LogWarning($"[EasyAdMob] Skipped missing scene: {buildScene.path}");
+                    continue;
+                }
+
+                bool wasAlreadyOpen = originallyOpenScenePaths.Contains(buildScene.path);
+                Scene scene;
+
+                if (wasAlreadyOpen)
+                {
+                    scene = EditorSceneManager.GetSceneByPath(buildScene.path);
+                }
+                else
+                {
+                    scene = EditorSceneManager.OpenScene(buildScene.path, OpenSceneMode.Additive);
+                }
+
+                scannedCount++;
+                bool sceneChanged = false;
+
+                foreach (GameObject rootGo in scene.GetRootGameObjects())
+                {
+                    Component adManagerComponent = rootGo.GetComponentInChildren(adManagerType, true);
+                    if (adManagerComponent == null)
+                    {
+                        continue;
+                    }
+
+                    SerializedObject serializedAdManager = new SerializedObject(adManagerComponent);
 
                     SetSerializedString(serializedAdManager, "bannerAdUnitId", bannerId);
                     SetSerializedString(serializedAdManager, "interstitialAdUnitId", interstitialId);
                     SetSerializedString(serializedAdManager, "rewardedAdUnitId", rewardedId);
                     SetSerializedString(serializedAdManager, "rewardedInterstitialAdUnitId", rewardedInterstitialId);
 
-                    serializedAdManager.ApplyModifiedProperties();
-                    EditorUtility.SetDirty(adManagerObj);
-                    Debug.Log("[EasyAdMob] Applied Ad Unit IDs to [AdManager] in active scene.");
+                    if (serializedAdManager.ApplyModifiedProperties())
+                    {
+                        EditorUtility.SetDirty(adManagerComponent);
+                        sceneChanged = true;
+                        updatedCount++;
+                        Debug.Log($"[EasyAdMob] Applied Ad Unit IDs to [AdManager] in scene: {buildScene.path}");
+                    }
+                }
+
+                if (sceneChanged)
+                {
+                    EditorSceneManager.MarkSceneDirty(scene);
+                    EditorSceneManager.SaveScene(scene);
+                }
+
+                // Only close scenes we opened ourselves for this pass - never touch a scene
+                // the user already had open, even if it turned out to have no AdManager.
+                if (!wasAlreadyOpen)
+                {
+                    EditorSceneManager.CloseScene(scene, true);
                 }
             }
+
+            // Restore focus to whatever scene was active before we started.
+            if (!string.IsNullOrEmpty(originalSetupPath))
+            {
+                Scene originalScene = EditorSceneManager.GetSceneByPath(originalSetupPath);
+                if (originalScene.IsValid())
+                {
+                    EditorSceneManager.SetActiveScene(originalScene);
+                }
+            }
+
+            Debug.Log($"[EasyAdMob] Scanned {scannedCount} scene(s) from Build Settings, updated [AdManager] in {updatedCount}.");
+        }
+
+        private bool AnyOpenSceneIsDirty()
+        {
+            for (int i = 0; i < EditorSceneManager.sceneCount; i++)
+            {
+                if (EditorSceneManager.GetSceneAt(i).isDirty)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private void SetSerializedString(SerializedObject target, string propertyName, string value)
