@@ -525,6 +525,20 @@ namespace EasyAdMob.Editor
                         adMobIOSAppIdProp.stringValue = iosAppId.Trim();
                     }
 
+                    // Gradle build pre-processor / kotlinx.coroutines packaging: plain bools,
+                    // safe to force on directly.
+                    SetSerializedBool(serializedSettings, "enableGradleBuildPreProcessor", true);
+                    SetSerializedBool(serializedSettings, "enableKotlinXCoroutinesPackagingOption", true);
+
+                    // Next-Gen Android SDK architecture switch. "overrideDefaultGmaAndroidSdk"
+                    // flips the toggle on; "selectedGmaAndroidSdk" then picks which
+                    // architecture. That second field is an enum (int-backed) whose exact
+                    // numeric values aren't documented anywhere we could confirm, so instead
+                    // of hardcoding a guessed int - which would risk silently selecting the
+                    // WRONG architecture if the guess were wrong, worse than doing nothing -
+                    // we resolve it by matching the enum member's name at runtime.
+                    TrySwitchToNextGenAndroidSdk(serializedSettings);
+
                     serializedSettings.ApplyModifiedProperties();
                     EditorUtility.SetDirty(settingsInstance);
                     AssetDatabase.SaveAssets();
@@ -694,6 +708,72 @@ namespace EasyAdMob.Editor
             if (prop != null && !string.IsNullOrEmpty(value))
             {
                 prop.stringValue = value.Trim();
+            }
+        }
+
+        private void SetSerializedBool(SerializedObject target, string propertyName, bool value)
+        {
+            SerializedProperty prop = target.FindProperty(propertyName);
+            if (prop != null && prop.propertyType == SerializedPropertyType.Boolean)
+            {
+                prop.boolValue = value;
+            }
+        }
+
+        /// <summary>
+        /// Turns on "override default GMA Android SDK" and, if we can positively identify
+        /// which enum value corresponds to the Next-Gen SDK, selects it. We deliberately do
+        /// NOT hardcode a numeric enum value here: we couldn't confirm the real underlying
+        /// int from public plugin source, and guessing wrong would silently select the wrong
+        /// architecture (worse than leaving the field untouched). Instead we read the actual
+        /// enum type backing "selectedGmaAndroidSdk" via reflection and match by member name.
+        /// If no confident match is found, the override flag is still enabled but the
+        /// architecture selection is left alone, and a warning explains why - so the user can
+        /// finish that one step manually in Assets > Google Mobile Ads > Settings.
+        /// </summary>
+        private void TrySwitchToNextGenAndroidSdk(SerializedObject settingsObject)
+        {
+            SerializedProperty overrideProp = settingsObject.FindProperty("overrideDefaultGmaAndroidSdk");
+            SerializedProperty selectedProp = settingsObject.FindProperty("selectedGmaAndroidSdk");
+
+            if (overrideProp == null || overrideProp.propertyType != SerializedPropertyType.Boolean)
+            {
+                Debug.LogWarning("[EasyAdMob] Could not find 'overrideDefaultGmaAndroidSdk' on GoogleMobileAdsSettings. Skipping Next-Gen SDK switch - your installed plugin version may use a different field name.");
+                return;
+            }
+
+            overrideProp.boolValue = true;
+
+            if (selectedProp == null || selectedProp.propertyType != SerializedPropertyType.Enum)
+            {
+                Debug.LogWarning("[EasyAdMob] Could not find an enum field 'selectedGmaAndroidSdk' on GoogleMobileAdsSettings. Enabled the override, but you'll need to manually pick 'Upgrade to the GMA Next-Gen SDK' in Assets > Google Mobile Ads > Settings.");
+                return;
+            }
+
+            // enumDisplayNames / enumNames give us the actual declared member names in order,
+            // matching them up with SerializedProperty.enumValueIndex (an index into that
+            // array, NOT necessarily the underlying int value if the enum has explicit values).
+            string[] enumNames = selectedProp.enumNames;
+            int nextGenIndex = -1;
+
+            for (int i = 0; i < enumNames.Length; i++)
+            {
+                string candidate = enumNames[i].Replace("_", "").Replace(" ", "");
+                if (candidate.IndexOf("NextGen", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    nextGenIndex = i;
+                    break;
+                }
+            }
+
+            if (nextGenIndex >= 0)
+            {
+                selectedProp.enumValueIndex = nextGenIndex;
+                Debug.Log($"[EasyAdMob] Switched Google Mobile Ads Android architecture to '{enumNames[nextGenIndex]}'.");
+            }
+            else
+            {
+                Debug.LogWarning($"[EasyAdMob] Enabled Android SDK override, but couldn't find an enum option matching 'Next-Gen' among: [{string.Join(", ", enumNames)}]. Please select it manually in Assets > Google Mobile Ads > Settings.");
             }
         }
 
