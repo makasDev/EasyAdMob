@@ -85,7 +85,7 @@ namespace EasyAdMob.Editor
         public static void ShowWindow()
         {
             var window = GetWindow<AdManagerSetupMenu>("EasyAdMob Setup");
-            window.minSize = new Vector2(440, 620);
+            window.minSize = new Vector2(440, 760);
             window.Show();
         }
 
@@ -145,7 +145,54 @@ namespace EasyAdMob.Editor
             GUILayout.Space(10);
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Step 2: App & Ad Unit IDs", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Step 2: Android SDK Architecture", EditorStyles.boldLabel);
+            GUILayout.Space(4);
+
+            bool? isNextGen = IsNextGenAndroidSdkActive();
+
+            if (isNextGen == null)
+            {
+                EditorGUILayout.HelpBox("Could not read the current architecture from GoogleMobileAdsSettings. Install/select the Google Mobile Ads SDK first.", MessageType.Warning);
+            }
+            else if (isNextGen.Value)
+            {
+                EditorGUILayout.HelpBox("Currently using the GMA Next-Gen SDK.", MessageType.Info);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("Currently using the standard Google Mobile Ads SDK. The Next-Gen SDK improves latency and stability, and requires min API level 24+.", MessageType.Info);
+
+                if (GUILayout.Button("Switch to Next-Gen Android SDK", GUILayout.Height(30)))
+                {
+                    Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
+                                           ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
+                    UnityEngine.Object settingsInstance = googleSettingsType != null ? Resources.Load("GoogleMobileAdsSettings") : null;
+
+                    if (settingsInstance == null || googleSettingsType == null)
+                    {
+                        EditorUtility.DisplayDialog("GoogleMobileAdsSettings Not Found", "Open 'Assets > Google Mobile Ads > Settings' once to create the settings asset, then try again.", "OK");
+                    }
+                    else
+                    {
+                        bool confirmSwitch = EditorUtility.DisplayDialog(
+                            "Switch to Next-Gen Android SDK?",
+                            "This switches your project's Google Mobile Ads Android architecture to the Next-Gen SDK. This requires minimum API level 24+. You can switch back to the standard SDK at any time from Assets > Google Mobile Ads > Settings.",
+                            "Switch",
+                            "Cancel");
+
+                        if (confirmSwitch)
+                        {
+                            TrySwitchToNextGenAndroidSdk(settingsInstance, googleSettingsType);
+                        }
+                    }
+                }
+            }
+            EditorGUILayout.EndVertical();
+
+            GUILayout.Space(10);
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Step 3: App & Ad Unit IDs", EditorStyles.boldLabel);
             GUILayout.Space(4);
 
             EditorGUILayout.LabelField("Google Mobile Ads App IDs", EditorStyles.miniBoldLabel);
@@ -178,7 +225,7 @@ namespace EasyAdMob.Editor
             GUILayout.Space(10);
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Step 3: Scene Setup", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Step 4: Scene Setup", EditorStyles.boldLabel);
             GUILayout.Space(4);
 
             if (GUILayout.Button("Create [AdManager] in Active Scene", GUILayout.Height(30)))
@@ -530,15 +577,6 @@ namespace EasyAdMob.Editor
                     SetSerializedBool(serializedSettings, "enableGradleBuildPreProcessor", true);
                     SetSerializedBool(serializedSettings, "enableKotlinXCoroutinesPackagingOption", true);
 
-                    // Next-Gen Android SDK architecture switch. "overrideDefaultGmaAndroidSdk"
-                    // flips the toggle on; "selectedGmaAndroidSdk" then picks which
-                    // architecture. That second field is an enum (int-backed) whose exact
-                    // numeric values aren't documented anywhere we could confirm, so instead
-                    // of hardcoding a guessed int - which would risk silently selecting the
-                    // WRONG architecture if the guess were wrong, worse than doing nothing -
-                    // we resolve it by matching the enum member's name at runtime.
-                    TrySwitchToNextGenAndroidSdk(serializedSettings);
-
                     serializedSettings.ApplyModifiedProperties();
                     EditorUtility.SetDirty(settingsInstance);
                     AssetDatabase.SaveAssets();
@@ -720,61 +758,78 @@ namespace EasyAdMob.Editor
             }
         }
 
+        // Confirmed against the actual GoogleMobileAdsSettings source (internal class,
+        // GoogleMobileAds.Editor namespace):
+        //   public enum GmaAndroidSdk { Standard = 0, NextGen = 1 }
+        //   public bool OverrideDefaultGmaAndroidSdk { get; set; }
+        //   public int SelectedGmaAndroidSdk { get; set; }
+        // The class is internal, so we can't reference GoogleMobileAdsSettings or GmaAndroidSdk
+        // by type at compile time from this assembly - but the property names and the int value
+        // for NextGen are now known for certain rather than guessed, so plain reflection on the
+        // public properties is safe and doesn't need SerializedObject/enum-name matching at all.
+        private const int GMA_ANDROID_SDK_NEXT_GEN = 1;
+
         /// <summary>
-        /// Turns on "override default GMA Android SDK" and, if we can positively identify
-        /// which enum value corresponds to the Next-Gen SDK, selects it. We deliberately do
-        /// NOT hardcode a numeric enum value here: we couldn't confirm the real underlying
-        /// int from public plugin source, and guessing wrong would silently select the wrong
-        /// architecture (worse than leaving the field untouched). Instead we read the actual
-        /// enum type backing "selectedGmaAndroidSdk" via reflection and match by member name.
-        /// If no confident match is found, the override flag is still enabled but the
-        /// architecture selection is left alone, and a warning explains why - so the user can
-        /// finish that one step manually in Assets > Google Mobile Ads > Settings.
+        /// Switches the project to the GMA Next-Gen Android SDK architecture by setting
+        /// OverrideDefaultGmaAndroidSdk = true and SelectedGmaAndroidSdk = 1 (NextGen) via
+        /// reflection on the confirmed public properties. Returns true on success so the caller
+        /// can report it distinctly from "already on Next-Gen" or "failed".
         /// </summary>
-        private void TrySwitchToNextGenAndroidSdk(SerializedObject settingsObject)
+        private bool TrySwitchToNextGenAndroidSdk(UnityEngine.Object settingsInstance, Type googleSettingsType)
         {
-            SerializedProperty overrideProp = settingsObject.FindProperty("overrideDefaultGmaAndroidSdk");
-            SerializedProperty selectedProp = settingsObject.FindProperty("selectedGmaAndroidSdk");
+            PropertyInfo overrideProp = googleSettingsType.GetProperty("OverrideDefaultGmaAndroidSdk", BindingFlags.Public | BindingFlags.Instance);
+            PropertyInfo selectedProp = googleSettingsType.GetProperty("SelectedGmaAndroidSdk", BindingFlags.Public | BindingFlags.Instance);
 
-            if (overrideProp == null || overrideProp.propertyType != SerializedPropertyType.Boolean)
+            if (overrideProp == null || selectedProp == null || !overrideProp.CanWrite || !selectedProp.CanWrite)
             {
-                Debug.LogWarning("[EasyAdMob] Could not find 'overrideDefaultGmaAndroidSdk' on GoogleMobileAdsSettings. Skipping Next-Gen SDK switch - your installed plugin version may use a different field name.");
-                return;
+                Debug.LogWarning("[EasyAdMob] Could not find the expected Next-Gen SDK properties on GoogleMobileAdsSettings. Your installed plugin version may differ - please switch it manually in Assets > Google Mobile Ads > Settings.");
+                return false;
             }
 
-            overrideProp.boolValue = true;
+            overrideProp.SetValue(settingsInstance, true);
+            selectedProp.SetValue(settingsInstance, GMA_ANDROID_SDK_NEXT_GEN);
 
-            if (selectedProp == null || selectedProp.propertyType != SerializedPropertyType.Enum)
+            EditorUtility.SetDirty(settingsInstance);
+            AssetDatabase.SaveAssets();
+            Debug.Log("[EasyAdMob] Switched Google Mobile Ads Android architecture to Next-Gen SDK.");
+            return true;
+        }
+
+        /// <summary>
+        /// Reads the current Android SDK architecture (Standard vs Next-Gen) for display in the
+        /// wizard, without needing to reference the internal GoogleMobileAdsSettings type.
+        /// Returns null if the settings asset or properties can't be found/read.
+        /// </summary>
+        private bool? IsNextGenAndroidSdkActive()
+        {
+            Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
+                                   ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
+            if (googleSettingsType == null)
             {
-                Debug.LogWarning("[EasyAdMob] Could not find an enum field 'selectedGmaAndroidSdk' on GoogleMobileAdsSettings. Enabled the override, but you'll need to manually pick 'Upgrade to the GMA Next-Gen SDK' in Assets > Google Mobile Ads > Settings.");
-                return;
+                return null;
             }
 
-            // enumDisplayNames / enumNames give us the actual declared member names in order,
-            // matching them up with SerializedProperty.enumValueIndex (an index into that
-            // array, NOT necessarily the underlying int value if the enum has explicit values).
-            string[] enumNames = selectedProp.enumNames;
-            int nextGenIndex = -1;
-
-            for (int i = 0; i < enumNames.Length; i++)
+            UnityEngine.Object settingsInstance = Resources.Load("GoogleMobileAdsSettings");
+            if (settingsInstance == null)
             {
-                string candidate = enumNames[i].Replace("_", "").Replace(" ", "");
-                if (candidate.IndexOf("NextGen", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    nextGenIndex = i;
-                    break;
-                }
+                return null;
             }
 
-            if (nextGenIndex >= 0)
+            PropertyInfo overrideProp = googleSettingsType.GetProperty("OverrideDefaultGmaAndroidSdk", BindingFlags.Public | BindingFlags.Instance);
+            PropertyInfo selectedProp = googleSettingsType.GetProperty("SelectedGmaAndroidSdk", BindingFlags.Public | BindingFlags.Instance);
+            if (overrideProp == null || selectedProp == null)
             {
-                selectedProp.enumValueIndex = nextGenIndex;
-                Debug.Log($"[EasyAdMob] Switched Google Mobile Ads Android architecture to '{enumNames[nextGenIndex]}'.");
+                return null;
             }
-            else
+
+            bool overrideEnabled = (bool)overrideProp.GetValue(settingsInstance);
+            if (!overrideEnabled)
             {
-                Debug.LogWarning($"[EasyAdMob] Enabled Android SDK override, but couldn't find an enum option matching 'Next-Gen' among: [{string.Join(", ", enumNames)}]. Please select it manually in Assets > Google Mobile Ads > Settings.");
+                return false; // Not overridden -> effectively Standard, matching EffectiveGmaAndroidSdk's own fallback.
             }
+
+            int selected = (int)selectedProp.GetValue(settingsInstance);
+            return selected == GMA_ANDROID_SDK_NEXT_GEN;
         }
 
         private GameObject CreateAdManagerInScene()
