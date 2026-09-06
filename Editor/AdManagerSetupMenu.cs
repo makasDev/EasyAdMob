@@ -170,6 +170,7 @@ namespace EasyAdMob.Editor
 
                     if (settingsInstance == null || googleSettingsType == null)
                     {
+                        Debug.LogWarning("[EasyAdMob] Could not switch Android SDK architecture: GoogleMobileAdsSettings asset not found. Open 'Assets > Google Mobile Ads > Settings' once to create it.");
                         EditorUtility.DisplayDialog("GoogleMobileAdsSettings Not Found", "Open 'Assets > Google Mobile Ads > Settings' once to create the settings asset, then try again.", "OK");
                     }
                     else
@@ -183,6 +184,10 @@ namespace EasyAdMob.Editor
                         if (confirmSwitch)
                         {
                             TrySwitchToNextGenAndroidSdk(settingsInstance, googleSettingsType);
+                        }
+                        else
+                        {
+                            Debug.Log("[EasyAdMob] Next-Gen Android SDK switch cancelled by user.");
                         }
                     }
                 }
@@ -370,6 +375,7 @@ namespace EasyAdMob.Editor
 
                 if (!confirmed)
                 {
+                    Debug.Log("[EasyAdMob] Fill Test IDs cancelled - custom IDs were preserved.");
                     return;
                 }
             }
@@ -533,8 +539,11 @@ namespace EasyAdMob.Editor
 
                 if (!applyAnyway)
                 {
+                    Debug.Log($"[EasyAdMob] Apply cancelled - invalid field(s): {string.Join(", ", invalidFields)}");
                     return;
                 }
+
+                Debug.LogWarning($"[EasyAdMob] Applying despite invalid field(s): {string.Join(", ", invalidFields)}");
             }
 
             ApplyIDsToProjectAndScene();
@@ -642,6 +651,7 @@ namespace EasyAdMob.Editor
 
                 if (!proceed)
                 {
+                    Debug.Log("[EasyAdMob] Cross-scene ID apply cancelled - unsaved scene changes present.");
                     return;
                 }
             }
