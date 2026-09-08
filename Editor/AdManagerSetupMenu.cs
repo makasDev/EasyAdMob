@@ -476,6 +476,11 @@ namespace EasyAdMob.Editor
             isDownloading = true;
             downloadProgress = 0f;
 
+            // Auto-create the settings asset as soon as the package finishes importing,
+            // so Step 2/3 detect it without the user ever opening the plugin's settings.
+            AssetDatabase.importPackageCompleted += OnAdMobPackageImported;
+            AssetDatabase.importPackageFailed += OnAdMobPackageImportFailed;
+
             UnityWebRequest request = UnityWebRequest.Get(ADMOB_PACKAGE_URL);
             UnityWebRequestAsyncOperation operation = request.SendWebRequest();
 
@@ -496,6 +501,8 @@ namespace EasyAdMob.Editor
                     {
                         Debug.LogError($"[EasyAdMob] Failed to download SDK: {request.error}");
                         EditorUtility.DisplayDialog("Download Error", request.error, "OK");
+                        AssetDatabase.importPackageCompleted -= OnAdMobPackageImported;
+                        AssetDatabase.importPackageFailed -= OnAdMobPackageImportFailed;
                     }
                     else
                     {
@@ -504,12 +511,142 @@ namespace EasyAdMob.Editor
                         
                         AddScriptingDefineSymbol();
                         AssetDatabase.ImportPackage(TEMP_FILE_PATH, interactive: true);
+                        // Note: importPackageCompleted fires after the user confirms the
+                        // import dialog and the import finishes (followed by a domain reload).
                     }
                     Repaint();
                 }
             };
 
             EditorApplication.update += updateProgress;
+        }
+
+        private void OnAdMobPackageImported(string packageName)
+        {
+            AssetDatabase.importPackageCompleted -= OnAdMobPackageImported;
+            AssetDatabase.importPackageFailed -= OnAdMobPackageImportFailed;
+            Debug.Log($"[EasyAdMob] Imported '{packageName}'. Ensuring GoogleMobileAdsSettings asset exists...");
+
+            // After import + domain reload, run on the next editor tick so the plugin's
+            // editor assembly is fully loaded before we reflect on it.
+            EditorApplication.delayCall += () =>
+            {
+                Type settingsType = FindGoogleMobileAdsSettingsType();
+                if (settingsType != null)
+                {
+                    GetOrCreateGoogleMobileAdsSettings(settingsType);
+                }
+                Repaint();
+            };
+        }
+
+        private void OnAdMobPackageImportFailed(string packageName, string errorMessage)
+        {
+            AssetDatabase.importPackageCompleted -= OnAdMobPackageImported;
+            AssetDatabase.importPackageFailed -= OnAdMobPackageImportFailed;
+            Debug.LogError($"[EasyAdMob] Package import failed: {errorMessage}");
+        }
+
+        // ===================== GOOGLE MOBILE ADS SETTINGS RESOLUTION =====================
+
+        /// <summary>
+        /// Finds the plugin's internal GoogleMobileAdsSettings type by scanning loaded
+        /// assemblies instead of relying on Type.GetType with a hardcoded assembly name,
+        /// which breaks whenever Google renames the editor assembly between versions.
+        /// </summary>
+        private static Type FindGoogleMobileAdsSettingsType()
+        {
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type type = asm.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings");
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Returns the GoogleMobileAdsSettings asset, creating it if it doesn't exist yet.
+        /// The GMA plugin ships without this asset and only creates it lazily (normally when
+        /// its own Settings window opens), which is why a fresh import leaves the wizard
+        /// blind. Resolution order:
+        ///   1. Load the existing asset from Resources.
+        ///   2. Invoke the plugin's static Instance getter (internal in most versions) -
+        ///      its lazy-creation side effect writes the asset to disk.
+        ///   3. Create the asset ourselves at the exact path the plugin expects. The plugin's
+        ///      own Instance getter Resources.Load()s by that name later, so it adopts ours.
+        ///   4. Open the plugin's "Assets > Google Mobile Ads > Settings..." window via
+        ///      ExecuteMenuItem as a last resort - its OnEnable guarantees creation.
+        /// </summary>
+        private static UnityEngine.Object GetOrCreateGoogleMobileAdsSettings(Type settingsType)
+        {
+            if (settingsType == null)
+            {
+                return null;
+            }
+
+            // 1. Already on disk?
+            UnityEngine.Object settings = Resources.Load("GoogleMobileAdsSettings");
+            if (settings != null)
+            {
+                return settings;
+            }
+
+            // 2. Force the plugin to create it via its lazy Instance getter.
+            //    Internal in most plugin versions, so NonPublic is required - this was the
+            //    original bug: Public-only reflection silently returned null here.
+            PropertyInfo instanceProp = settingsType.GetProperty(
+                "Instance",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+
+            if (instanceProp != null)
+            {
+                settings = instanceProp.GetValue(null) as UnityEngine.Object;
+                if (settings != null)
+                {
+                    return settings;
+                }
+            }
+
+            // 3. Create the asset ourselves at the path the plugin expects.
+            try
+            {
+                settings = ScriptableObject.CreateInstance(settingsType);
+
+                const string dir = "Assets/GoogleMobileAds/Resources";
+                if (!Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                AssetDatabase.CreateAsset(settings, $"{dir}/GoogleMobileAdsSettings.asset");
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+                Debug.Log("[EasyAdMob] Created GoogleMobileAdsSettings.asset automatically.");
+                return settings;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[EasyAdMob] Could not create GoogleMobileAdsSettings.asset directly: {e.Message}");
+            }
+
+            // 4. Last resort: open the plugin's Settings window. Its OnEnable accesses
+            //    GoogleMobileAdsSettings.Instance, which creates the asset on disk.
+            //    ExecuteMenuItem works even though the window class is internal to the plugin.
+            if (EditorApplication.ExecuteMenuItem("Assets/Google Mobile Ads/Settings..."))
+            {
+                AssetDatabase.Refresh();
+                settings = Resources.Load("GoogleMobileAdsSettings");
+                if (settings != null)
+                {
+                    Debug.Log("[EasyAdMob] Opened the Google Mobile Ads Settings window to initialize the settings asset. You can close it - the wizard will now detect the asset.");
+                }
+                return settings;
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -563,18 +700,13 @@ namespace EasyAdMob.Editor
 
         private void ApplyIDsToProjectAndScene(bool skipUnsavedScenesCheckOverride = false)
         {
-            Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
-                                   ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
+            Type googleSettingsType = FindGoogleMobileAdsSettingsType();
 
             if (googleSettingsType != null)
             {
-                UnityEngine.Object settingsInstance = Resources.Load("GoogleMobileAdsSettings");
-
-                if (settingsInstance == null)
-                {
-                    PropertyInfo instanceProp = googleSettingsType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
-                    settingsInstance = instanceProp?.GetValue(null) as UnityEngine.Object;
-                }
+                // GetOrCreate ensures the asset exists instead of giving up and asking the
+                // user to open the settings window manually (which was the old behavior).
+                UnityEngine.Object settingsInstance = GetOrCreateGoogleMobileAdsSettings(googleSettingsType);
 
                 if (settingsInstance != null)
                 {
@@ -605,7 +737,7 @@ namespace EasyAdMob.Editor
                 }
                 else
                 {
-                    Debug.LogWarning("[EasyAdMob] Could not find or instantiate GoogleMobileAdsSettings asset. Open 'Assets > Google Mobile Ads > Settings' once in Unity to create it.");
+                    Debug.LogWarning("[EasyAdMob] Could not find or create GoogleMobileAdsSettings. Open 'Assets > Google Mobile Ads > Settings' once in Unity to create it.");
                 }
             }
 
@@ -859,13 +991,14 @@ namespace EasyAdMob.Editor
         /// </summary>
         private void TrySwitchToNextGenAndroidSdkFromButton()
         {
-            Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
-                                   ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
-            UnityEngine.Object settingsInstance = googleSettingsType != null ? Resources.Load("GoogleMobileAdsSettings") : null;
+            Type googleSettingsType = FindGoogleMobileAdsSettingsType();
+            UnityEngine.Object settingsInstance = googleSettingsType != null
+                ? GetOrCreateGoogleMobileAdsSettings(googleSettingsType)
+                : null;
 
             if (settingsInstance == null || googleSettingsType == null)
             {
-                Debug.LogWarning("[EasyAdMob] Could not switch Android SDK architecture: GoogleMobileAdsSettings asset not found. Open 'Assets > Google Mobile Ads > Settings' once to create it.");
+                Debug.LogWarning("[EasyAdMob] Could not switch Android SDK architecture: GoogleMobileAdsSettings asset not found.");
                 EditorUtility.DisplayDialog("GoogleMobileAdsSettings Not Found", "Open 'Assets > Google Mobile Ads > Settings' once to create the settings asset, then try again.", "OK");
                 return;
             }
@@ -916,11 +1049,11 @@ namespace EasyAdMob.Editor
         /// Reads the current Android SDK architecture (Standard vs Next-Gen) for display in the
         /// wizard, without needing to reference the internal GoogleMobileAdsSettings type.
         /// Returns null if the settings asset or properties can't be found/read.
+        /// Note: read-only on purpose - this must NOT create the asset just by opening the wizard.
         /// </summary>
         private bool? IsNextGenAndroidSdkActive()
         {
-            Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
-                                   ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
+            Type googleSettingsType = FindGoogleMobileAdsSettingsType();
             if (googleSettingsType == null)
             {
                 return null;
