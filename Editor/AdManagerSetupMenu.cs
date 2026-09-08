@@ -205,7 +205,7 @@ namespace EasyAdMob.Editor
 
             if (GUILayout.Button("Apply IDs to Project & Scene", GUILayout.Height(30)))
             {
-                EditorApplication.delayCall += TryApplyIDsToProjectAndScene;
+                EditorApplication.delayCall += () => TryApplyIDsToProjectAndScene();
             }
             EditorGUILayout.EndHorizontal();
             
