@@ -83,26 +83,30 @@ namespace EasyAdMob
             DestroyBannerAd();
             isBannerAdLoaded = false;
 
-            AdSize adSize = AdSize.GetCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth(AdSize.FullWidth);
-            bannerView = new BannerView(bannerAdUnitId, adSize, bannerPosition);
+            int deviceWidth = MobileAds.Utils.GetDeviceSafeWidth();
 
-            // Note: this is GoogleMobileAds' own BannerView.OnBannerAdLoaded event firing here
-            // (instance-level, owned by the SDK's BannerView type) - it's a different member
-            // from AdManager's own static OnBannerAdLoaded event that we invoke below. The two
-            // share a name because we mirrored the SDK's naming for consistency with the other
-            // ad types' events, but they are not the same event.
+            AdSize adSize =
+                AdSize.GetCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth(deviceWidth);
+
+            bannerView = new BannerView(
+                bannerAdUnitId,
+                adSize,
+                bannerPosition
+            );
+
             bannerView.OnBannerAdLoaded += () =>
             {
                 isBannerAdLoaded = true;
+                Debug.Log("[AdManager] Banner loaded successfully.");
                 OnBannerAdLoaded?.Invoke();
             };
 
-            // Per Google's own guidance, a banner that fails to load should be refreshed by
-            // reloading into the same view rather than destroyed and recreated.
             bannerView.OnBannerAdLoadFailed += (LoadAdError error) =>
             {
                 isBannerAdLoaded = false;
-                Debug.LogWarning($"[AdManager] Banner ad failed to load: {error?.GetMessage() ?? "unknown error"}");
+                Debug.LogWarning(
+                    $"[AdManager] Banner ad failed to load: {error?.GetMessage() ?? "unknown error"}"
+                );
             };
 
             AdRequest request = new AdRequest();
