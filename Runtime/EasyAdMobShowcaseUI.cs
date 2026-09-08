@@ -1,87 +1,45 @@
-using System;
-using System.Linq;
-using System.Reflection;
 using UnityEngine;
 
 namespace EasyAdMob
 {
+    /// <summary>
+    /// Thin wrapper the Showcase Demo Scene's buttons call into. Talks to AdManager directly
+    /// (same assembly, so no reflection needed) rather than looking methods up by name and
+    /// parameter count - that approach broke silently as soon as AdManager's Show...Ad methods
+    /// gained optional parameters and overloads, since a reflection filter written for the old
+    /// zero-argument signatures no longer matched anything and calls quietly became no-ops.
+    /// </summary>
     public class EasyAdMobShowcaseUI : MonoBehaviour
     {
-        public void ShowBanner() => InvokeAdManagerMethod("ShowBannerAd");
-        public void HideBanner() => InvokeAdManagerMethod("HideBannerAd");
-        public void ShowInterstitial() => InvokeAdManagerMethod("ShowInterstitialAd");
+        public void ShowBanner()
+        {
+            AdManager.Instance?.ShowBannerAd(
+                onAdUnavailable: () => Debug.Log("[EasyAdMob Showcase] Banner ad not loaded yet - loading now."));
+        }
+
+        public void HideBanner()
+        {
+            AdManager.Instance?.HideBannerAd();
+        }
+
+        public void ShowInterstitial()
+        {
+            AdManager.Instance?.ShowInterstitialAd(
+                onAdUnavailable: () => Debug.Log("[EasyAdMob Showcase] Interstitial ad not ready."));
+        }
 
         public void ShowRewarded()
         {
-            InvokeAdManagerRewardedMethod("ShowRewardedAd");
+            AdManager.Instance?.ShowRewardedAd(
+                onRewardSuccess: () => Debug.Log("[EasyAdMob Showcase] Reward earned!"),
+                onAdUnavailable: () => Debug.Log("[EasyAdMob Showcase] Rewarded ad not ready."));
         }
 
         public void ShowRewardedInterstitial()
         {
-            InvokeAdManagerRewardedMethod("ShowRewardedInterstitialAd");
-        }
-
-        private void InvokeAdManagerMethod(string methodName)
-        {
-            Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
-            if (adManagerType != null)
-            {
-                var instance = FindAdManagerInstance(adManagerType);
-                if (instance != null)
-                {
-                    MethodInfo method = adManagerType.GetMethods().FirstOrDefault(m => m.Name == methodName && m.GetParameters().Length == 0);
-                    method?.Invoke(instance, null);
-                }
-            }
-        }
-
-        private void InvokeAdManagerRewardedMethod(string methodName)
-        {
-            Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
-            if (adManagerType != null)
-            {
-                var instance = FindAdManagerInstance(adManagerType);
-                if (instance != null)
-                {
-                    MethodInfo method = adManagerType.GetMethods().FirstOrDefault(m => m.Name == methodName);
-                    if (method != null)
-                    {
-                        ParameterInfo[] parameters = method.GetParameters();
-                        if (parameters.Length == 0)
-                        {
-                            method.Invoke(instance, null);
-                        }
-                        else if (parameters.Length == 1)
-                        {
-                            Type paramType = parameters[0].ParameterType;
-                            object callback = null;
-
-                            if (paramType.IsGenericType && paramType.GetGenericTypeDefinition() == typeof(Action<>))
-                            {
-                                Type rewardType = paramType.GetGenericArguments()[0];
-                                MethodInfo dummyMethod = typeof(EasyAdMobShowcaseUI).GetMethod(nameof(OnRewardReceived), BindingFlags.NonPublic | BindingFlags.Instance).MakeGenericMethod(rewardType);
-                                callback = Delegate.CreateDelegate(paramType, this, dummyMethod);
-                            }
-
-                            method.Invoke(instance, new object[] { callback });
-                        }
-                    }
-                }
-            }
-        }
-
-        private UnityEngine.Object FindAdManagerInstance(Type type)
-        {
-#if UNITY_2023_1_OR_NEWER
-            return FindAnyObjectByType(type);
-#else
-            return FindObjectOfType(type);
-#endif
-        }
-
-        private void OnRewardReceived<T>(T reward)
-        {
-            Debug.Log($"[EasyAdMob Showcase] Reward earned: {reward}");
+            AdManager.Instance?.ShowRewardedInterstitialAd(
+                onRewardSuccess: () => Debug.Log("[EasyAdMob Showcase] Reward earned!"),
+                onAdUnavailable: () => Debug.Log("[EasyAdMob Showcase] Rewarded interstitial ad not ready."));
         }
     }
 }

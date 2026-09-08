@@ -12,7 +12,10 @@ namespace EasyAdMob
     {
         public static AdManager Instance { get; private set; }
 
+        public static event Action OnBannerAdLoaded;
+        public static event Action OnInterstitialAdLoaded;
         public static event Action OnRewardedAdLoaded;
+        public static event Action OnRewardedInterstitialAdLoaded;
 
         [Header("Banner Settings")]
         [SerializeField] private string bannerAdUnitId = "ca-app-pub-3940256099942544/6300978111"; // Default Test ID
@@ -32,6 +35,7 @@ namespace EasyAdMob
 
 #if EASY_ADMOB_GOOGLE_MOBILE_ADS
         private BannerView bannerView;
+        private bool isBannerAdLoaded;
         private InterstitialAd interstitialAd;
         private RewardedAd rewardedAd;
         private RewardedInterstitialAd rewardedInterstitialAd;
@@ -77,26 +81,66 @@ namespace EasyAdMob
         {
 #if EASY_ADMOB_GOOGLE_MOBILE_ADS
             DestroyBannerAd();
+            isBannerAdLoaded = false;
 
             AdSize adSize = AdSize.GetCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth(AdSize.FullWidth);
             bannerView = new BannerView(bannerAdUnitId, adSize, bannerPosition);
+
+            // Note: this is GoogleMobileAds' own BannerView.OnBannerAdLoaded event firing here
+            // (instance-level, owned by the SDK's BannerView type) - it's a different member
+            // from AdManager's own static OnBannerAdLoaded event that we invoke below. The two
+            // share a name because we mirrored the SDK's naming for consistency with the other
+            // ad types' events, but they are not the same event.
+            bannerView.OnBannerAdLoaded += () =>
+            {
+                isBannerAdLoaded = true;
+                OnBannerAdLoaded?.Invoke();
+            };
+
+            // Per Google's own guidance, a banner that fails to load should be refreshed by
+            // reloading into the same view rather than destroyed and recreated.
+            bannerView.OnBannerAdLoadFailed += (LoadAdError error) =>
+            {
+                isBannerAdLoaded = false;
+                Debug.LogWarning($"[AdManager] Banner ad failed to load: {error?.GetMessage() ?? "unknown error"}");
+            };
 
             AdRequest request = new AdRequest();
             bannerView.LoadAd(request);
 #endif
         }
 
-        public void ShowBannerAd()
+        public bool IsBannerAdReady()
         {
 #if EASY_ADMOB_GOOGLE_MOBILE_ADS
-            if (bannerView != null)
+            return bannerView != null && isBannerAdLoaded;
+#else
+            return false;
+#endif
+        }
+
+        // Banner loading is asynchronous (BannerView.LoadAd fires OnBannerAdLoaded/
+        // OnBannerAdLoadFailed some time later), so unlike the full-screen ad types this
+        // can't bundle a synchronous readiness check the same way - there's nothing to
+        // instantly show yet. If no banner is loaded, this starts a load and lets the
+        // caller know via onAdUnavailable so they aren't left silently waiting; the banner
+        // will still appear once loaded if the caller calls ShowBannerAd() again, or you can
+        // subscribe to IsBannerAdReady() polling / your own loaded-state UI as needed.
+        public void ShowBannerAd(Action onAdUnavailable = null)
+        {
+#if EASY_ADMOB_GOOGLE_MOBILE_ADS
+            if (IsBannerAdReady())
             {
                 bannerView.Show();
             }
             else
             {
+                Debug.LogWarning("[AdManager] ShowBannerAd called but no banner ad was loaded yet. Loading one now.");
+                onAdUnavailable?.Invoke();
                 LoadBannerAd();
             }
+#else
+            onAdUnavailable?.Invoke();
 #endif
         }
 
@@ -114,6 +158,7 @@ namespace EasyAdMob
             {
                 bannerView.Destroy();
                 bannerView = null;
+                isBannerAdLoaded = false;
             }
 #endif
         }
@@ -129,6 +174,7 @@ namespace EasyAdMob
                 if (error != null || ad == null)
                 {
                     rewardedAd = null;
+                    Debug.LogWarning($"[AdManager] Rewarded ad failed to load: {error?.GetMessage() ?? "unknown error"}");
                     return;
                 }
 
@@ -154,14 +200,23 @@ namespace EasyAdMob
         // ad (taps the X), so any gameplay logic gated on it was running while the
         // ad was still on screen. Gating on close instead makes sure game state
         // only changes once the player is actually back looking at the game.
-        public void ShowRewardedAd(Action onRewardSuccess)
+        //
+        // Readiness is checked internally now, so callers don't need to call
+        // IsRewardedAdReady() themselves first - IsRewardedAdReady() is still public
+        // for anyone who wants to gate UI on it (e.g. disabling a "Watch Ad" button
+        // while nothing is loaded). If no ad is available, onAdUnavailable fires
+        // instead of onRewardSuccess (silently doing nothing here would leave the
+        // caller with no way to know the reward never happened), and a fresh ad
+        // load is kicked off in the background either way.
+        public void ShowRewardedAd(Action onRewardSuccess, Action onAdUnavailable = null)
         {
 #if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (IsRewardedAdReady())
             {
                 bool rewardGranted = false;
+                RewardedAd adToShow = rewardedAd;
 
-                rewardedAd.OnAdFullScreenContentClosed += () =>
+                adToShow.OnAdFullScreenContentClosed += () =>
                 {
                     if (rewardGranted)
                     {
@@ -169,7 +224,19 @@ namespace EasyAdMob
                     }
                 };
 
-                rewardedAd.Show((Reward reward) =>
+                // If the ad fails to actually open (rare - e.g. a network blip between load and
+                // show), OnAdFullScreenContentClosed never fires for this attempt, so without
+                // this handler onRewardSuccess/onAdUnavailable would simply never be called and
+                // the caller would be left hanging with no callback and no error. Per Google's
+                // own samples, the correct response is to surface it and load a fresh ad.
+                adToShow.OnAdFullScreenContentFailed += (AdError error) =>
+                {
+                    Debug.LogWarning($"[AdManager] Rewarded ad failed to show: {error?.GetMessage() ?? "unknown error"}");
+                    onAdUnavailable?.Invoke();
+                    LoadRewardedAd();
+                };
+
+                adToShow.Show((Reward reward) =>
                 {
                     Debug.Log($"[AdManager] Reward earned: {reward.Type}");
                     rewardGranted = true; // record it, act on close instead
@@ -178,8 +245,12 @@ namespace EasyAdMob
             }
             else
             {
+                Debug.LogWarning("[AdManager] ShowRewardedAd called but no rewarded ad was ready. Loading one for next time.");
+                onAdUnavailable?.Invoke();
                 LoadRewardedAd();
             }
+#else
+            onAdUnavailable?.Invoke();
 #endif
         }
 
@@ -194,10 +265,12 @@ namespace EasyAdMob
                 if (error != null || ad == null)
                 {
                     rewardedInterstitialAd = null;
+                    Debug.LogWarning($"[AdManager] Rewarded interstitial ad failed to load: {error?.GetMessage() ?? "unknown error"}");
                     return;
                 }
 
                 rewardedInterstitialAd = ad;
+                OnRewardedInterstitialAdLoaded?.Invoke();
                 rewardedInterstitialAd.OnAdFullScreenContentClosed += () => LoadRewardedInterstitialAd();
             });
 #endif
@@ -213,15 +286,17 @@ namespace EasyAdMob
         }
 
         // Same fix as ShowRewardedAd: gate onRewardSuccess on OnAdFullScreenContentClosed
-        // instead of the Show() reward callback.
-        public void ShowRewardedInterstitialAd(Action onRewardSuccess)
+        // instead of the Show() reward callback. Also same readiness-bundling as
+        // ShowRewardedAd - see its comment for why onAdUnavailable exists.
+        public void ShowRewardedInterstitialAd(Action onRewardSuccess, Action onAdUnavailable = null)
         {
 #if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (IsRewardedInterstitialAdReady())
             {
                 bool rewardGranted = false;
+                RewardedInterstitialAd adToShow = rewardedInterstitialAd;
 
-                rewardedInterstitialAd.OnAdFullScreenContentClosed += () =>
+                adToShow.OnAdFullScreenContentClosed += () =>
                 {
                     if (rewardGranted)
                     {
@@ -229,7 +304,15 @@ namespace EasyAdMob
                     }
                 };
 
-                rewardedInterstitialAd.Show((Reward reward) =>
+                // See ShowRewardedAd for why this handler exists.
+                adToShow.OnAdFullScreenContentFailed += (AdError error) =>
+                {
+                    Debug.LogWarning($"[AdManager] Rewarded interstitial ad failed to show: {error?.GetMessage() ?? "unknown error"}");
+                    onAdUnavailable?.Invoke();
+                    LoadRewardedInterstitialAd();
+                };
+
+                adToShow.Show((Reward reward) =>
                 {
                     rewardGranted = true;
                 });
@@ -237,12 +320,16 @@ namespace EasyAdMob
             }
             else
             {
+                Debug.LogWarning("[AdManager] ShowRewardedInterstitialAd called but no ad was ready. Loading one for next time.");
+                onAdUnavailable?.Invoke();
                 LoadRewardedInterstitialAd();
             }
+#else
+            onAdUnavailable?.Invoke();
 #endif
         }
 
-        public void ShowRewardedInterstitialAd() => ShowRewardedInterstitialAd(null);
+        public void ShowRewardedInterstitialAd() => ShowRewardedInterstitialAd(null, null);
 
         // ===================== INTERSTITIAL ADS =====================
 
@@ -255,10 +342,12 @@ namespace EasyAdMob
                 if (error != null || ad == null)
                 {
                     interstitialAd = null;
+                    Debug.LogWarning($"[AdManager] Interstitial ad failed to load: {error?.GetMessage() ?? "unknown error"}");
                     return;
                 }
 
                 interstitialAd = ad;
+                OnInterstitialAdLoaded?.Invoke();
                 interstitialAd.OnAdFullScreenContentClosed += () => LoadInterstitialAd();
             });
 #endif
@@ -273,18 +362,33 @@ namespace EasyAdMob
 #endif
         }
 
-        public void ShowInterstitialAd()
+        public void ShowInterstitialAd(Action onAdUnavailable = null)
         {
 #if EASY_ADMOB_GOOGLE_MOBILE_ADS
             if (IsInterstitialAdReady())
             {
-                interstitialAd.Show();
+                InterstitialAd adToShow = interstitialAd;
+
+                // See ShowRewardedAd for why this handler exists - if Show() fails to actually
+                // open, this is the only signal the caller gets that nothing happened.
+                adToShow.OnAdFullScreenContentFailed += (AdError error) =>
+                {
+                    Debug.LogWarning($"[AdManager] Interstitial ad failed to show: {error?.GetMessage() ?? "unknown error"}");
+                    onAdUnavailable?.Invoke();
+                    LoadInterstitialAd();
+                };
+
+                adToShow.Show();
                 interstitialAd = null;
             }
             else
             {
+                Debug.LogWarning("[AdManager] ShowInterstitialAd called but no ad was ready. Loading one for next time.");
+                onAdUnavailable?.Invoke();
                 LoadInterstitialAd();
             }
+#else
+            onAdUnavailable?.Invoke();
 #endif
         }
 

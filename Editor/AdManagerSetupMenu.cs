@@ -219,12 +219,21 @@ namespace EasyAdMob.Editor
 
             if (GUILayout.Button("Create [AdManager] in Active Scene", GUILayout.Height(30)))
             {
+                // Snapshot BEFORE anything runs: CreateAdManagerInScene() creates a GameObject,
+                // which immediately dirties the active scene. If we check isDirty after that,
+                // it's always true and the "unsaved changes" dialog fires on every click,
+                // regardless of whether the user actually had pre-existing unsaved work.
+                // "No pre-existing unsaved work" -> safe to skip that later dirty-check entirely,
+                // since any dirt found after this point was caused by this button, not the user.
+                bool skipUnsavedCheck = !(EditorSceneManager.GetActiveScene().isDirty || AnyOpenSceneIsDirty());
+
                 // Deferred: TryApplyIDsToProjectAndScene() can show the invalid-ID dialog, which
                 // caused this exact button to trigger the layout warning before this fix.
                 EditorApplication.delayCall += () =>
                 {
-                    CreateAdManagerInScene();
-                    TryApplyIDsToProjectAndScene();
+                    GameObject adManagerGo = CreateAdManagerInScene();
+                    ApplyAdUnitIdsToGameObject(adManagerGo); // direct - the scan can't see an unsaved/unlisted scene
+                    TryApplyIDsToProjectAndScene(skipUnsavedCheck); // also syncs App IDs, Gradle/kotlinx toggles, and every other scene in Build Settings
                 };
             }
 
@@ -232,7 +241,11 @@ namespace EasyAdMob.Editor
 
             if (GUILayout.Button("Generate Showcase Demo Scene", GUILayout.Height(30)))
             {
-                EditorApplication.delayCall += () => GenerateShowcaseScene();
+                // Same reasoning as above: snapshot before EditorSceneManager.NewScene() runs,
+                // since a freshly created scene is dirty by definition until saved, and that
+                // must not be mistaken for "the user had unrelated unsaved work".
+                bool skipUnsavedCheck = !(EditorSceneManager.GetActiveScene().isDirty || AnyOpenSceneIsDirty());
+                EditorApplication.delayCall += () => GenerateShowcaseScene(skipUnsavedCheck);
             }
             EditorGUILayout.EndVertical();
 
@@ -506,7 +519,17 @@ namespace EasyAdMob.Editor
         /// them choose to fix it first or apply anyway (in case the format check is ever
         /// wrong about some new, valid AdMob id shape).
         /// </summary>
-        private void TryApplyIDsToProjectAndScene()
+        /// <param name="skipUnsavedScenesCheckOverride">
+        /// Pass a pre-click dirty-state snapshot when this is being called right after this same
+        /// action already created/modified scene content (e.g. from "Create [AdManager]" or
+        /// "Generate Showcase Demo Scene"). Those actions dirty the active scene themselves
+        /// before this method runs, so re-checking isDirty at this point would always be true
+        /// and would fire the "unsaved changes" warning on every click regardless of whether the
+        /// user had any actual pre-existing unsaved work. Pass false (the default) when calling
+        /// this directly, e.g. from the plain "Apply IDs to Project & Scene" button, where no
+        /// scene mutation has happened yet and a live isDirty check is accurate.
+        /// </param>
+        private void TryApplyIDsToProjectAndScene(bool skipUnsavedScenesCheckOverride = false)
         {
             var invalidFields = new System.Collections.Generic.List<string>();
 
@@ -535,10 +558,10 @@ namespace EasyAdMob.Editor
                 Debug.LogWarning($"[EasyAdMob] Applying despite invalid field(s): {string.Join(", ", invalidFields)}");
             }
 
-            ApplyIDsToProjectAndScene();
+            ApplyIDsToProjectAndScene(skipUnsavedScenesCheckOverride);
         }
 
-        private void ApplyIDsToProjectAndScene()
+        private void ApplyIDsToProjectAndScene(bool skipUnsavedScenesCheckOverride = false)
         {
             Type googleSettingsType = Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Editor")
                                    ?? Type.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings, GoogleMobileAds.Core.Editor");
@@ -589,7 +612,52 @@ namespace EasyAdMob.Editor
             Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
             if (adManagerType != null)
             {
-                ApplyAdUnitIdsAcrossAllScenes(adManagerType);
+                ApplyAdUnitIdsAcrossAllScenes(adManagerType, skipUnsavedScenesCheckOverride);
+            }
+        }
+
+        /// <summary>
+        /// Applies the current Ad Unit IDs directly to a specific AdManager GameObject in the
+        /// active scene, bypassing the Build-Settings scene scan entirely.
+        ///
+        /// This exists because ApplyAdUnitIdsAcrossAllScenes() only finds AdManagers in scenes
+        /// registered in Build Settings - and a scene just created by "Create [AdManager]" or
+        /// "Generate Showcase Demo Scene" is neither saved to disk yet nor in Build Settings, so
+        /// the scan finds nothing and silently no-ops for it. Since we already hold a direct
+        /// reference to the AdManager we just created, we apply to it explicitly instead of
+        /// relying on a scan that can't see it yet.
+        /// </summary>
+        private void ApplyAdUnitIdsToGameObject(GameObject adManagerGo)
+        {
+            if (adManagerGo == null)
+            {
+                return;
+            }
+
+            Type adManagerType = Type.GetType("EasyAdMob.AdManager, EasyAdMob.Runtime");
+            if (adManagerType == null)
+            {
+                return;
+            }
+
+            Component adManagerComponent = adManagerGo.GetComponentInChildren(adManagerType, true);
+            if (adManagerComponent == null)
+            {
+                return;
+            }
+
+            SerializedObject serializedAdManager = new SerializedObject(adManagerComponent);
+
+            SetSerializedString(serializedAdManager, "bannerAdUnitId", bannerId);
+            SetSerializedString(serializedAdManager, "interstitialAdUnitId", interstitialId);
+            SetSerializedString(serializedAdManager, "rewardedAdUnitId", rewardedId);
+            SetSerializedString(serializedAdManager, "rewardedInterstitialAdUnitId", rewardedInterstitialId);
+
+            if (serializedAdManager.ApplyModifiedProperties())
+            {
+                EditorUtility.SetDirty(adManagerComponent);
+                EditorSceneManager.MarkSceneDirty(adManagerGo.scene);
+                Debug.Log($"[EasyAdMob] Applied Ad Unit IDs to [AdManager] in active scene: {adManagerGo.scene.name}");
             }
         }
 
@@ -606,7 +674,12 @@ namespace EasyAdMob.Editor
         /// here purely to apply IDs is opened additively and closed again afterward, and the
         /// scene the user started in is never force-saved.
         /// </summary>
-        private void ApplyAdUnitIdsAcrossAllScenes(Type adManagerType)
+        /// <param name="skipUnsavedScenesCheck">
+        /// When true, skips the live isDirty check below and treats the scene(s) as having had
+        /// no pre-existing unsaved work - used when the caller already snapshotted dirty state
+        /// before it created/modified anything itself (see TryApplyIDsToProjectAndScene).
+        /// </param>
+        private void ApplyAdUnitIdsAcrossAllScenes(Type adManagerType, bool skipUnsavedScenesCheck = false)
         {
             EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
             if (buildScenes == null || buildScenes.Length == 0)
@@ -630,19 +703,28 @@ namespace EasyAdMob.Editor
             // If anything in the currently open scene(s) is unsaved, ask first - opening/closing
             // other scenes additively is safe, but we don't want to surprise the user by
             // touching scene state while they have unrelated unsaved edits sitting around.
-            if (EditorSceneManager.GetActiveScene().isDirty || AnyOpenSceneIsDirty())
+            // Skipped when the caller already confirmed (via a pre-click snapshot) that there
+            // was no unsaved work before its own scene mutation ran.
+            if (!skipUnsavedScenesCheck && (EditorSceneManager.GetActiveScene().isDirty || AnyOpenSceneIsDirty()))
             {
-                bool proceed = EditorUtility.DisplayDialog(
+                // Two real choices, streamlined into one click each: "Save & Proceed" actively
+                // saves every currently open, dirty scene right here instead of just asking the
+                // user to go do it manually first, then continues the cross-scene apply. Cancel
+                // backs out entirely and touches nothing.
+                bool saveAndProceed = EditorUtility.DisplayDialog(
                     "Unsaved Scene Changes",
-                    "You have unsaved changes in your currently open scene(s). Applying IDs across all scenes will open and close other scenes in the editor. Save your current scene(s) first to avoid confusion.",
-                    "Continue Anyway",
+                    "You have unsaved changes in your currently open scene(s). Applying IDs across all scenes will open and close other scenes in the editor.",
+                    "Save && Proceed",
                     "Cancel");
 
-                if (!proceed)
+                if (!saveAndProceed)
                 {
                     Debug.Log("[EasyAdMob] Cross-scene ID apply cancelled - unsaved scene changes present.");
                     return;
                 }
+
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("[EasyAdMob] Saved open scene(s) before applying IDs across all scenes.");
             }
 
             int updatedCount = 0;
@@ -896,7 +978,7 @@ namespace EasyAdMob.Editor
             return go;
         }
 
-        private void GenerateShowcaseScene()
+        private void GenerateShowcaseScene(bool skipUnsavedScenesCheckOverride = false)
         {
             if (!Directory.Exists("Assets/EasyAdMob/Scenes"))
             {
@@ -908,7 +990,8 @@ namespace EasyAdMob.Editor
             var newScene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
 
             GameObject adManagerGo = CreateAdManagerInScene();
-            TryApplyIDsToProjectAndScene();
+            ApplyAdUnitIdsToGameObject(adManagerGo); // direct - this scene isn't saved/in Build Settings yet, so the cross-scene scan can't find it
+            TryApplyIDsToProjectAndScene(skipUnsavedScenesCheckOverride); // also syncs App IDs, Gradle/kotlinx toggles, and every other scene in Build Settings
 
             Type showcaseType = Type.GetType("EasyAdMob.EasyAdMobShowcaseUI, EasyAdMob.Runtime") ?? typeof(EasyAdMobShowcaseUI);
             Component showcaseHelper = adManagerGo.GetComponent(showcaseType);
