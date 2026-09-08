@@ -153,6 +153,37 @@ namespace EasyAdMob.Editor
             if (isNextGen == null)
             {
                 EditorGUILayout.HelpBox("Could not read the current architecture from GoogleMobileAdsSettings. Install/select the Google Mobile Ads SDK first.", MessageType.Warning);
+
+                // Disabled when the SDK isn't installed yet - the menu item it triggers
+                // only exists after the Google Mobile Ads package is in the project.
+                using (new EditorGUI.DisabledScope(!hasAdMobAssembly))
+                {
+                    if (GUILayout.Button("Fix: Open Google Mobile Ads Settings", GUILayout.Height(30)))
+                    {
+                        // Deferred: opening a window mid-layout can desync IMGUI's layout
+                        // stack, same reason as the other deferred buttons in this window.
+                        EditorApplication.delayCall += () =>
+                        {
+                            // GetOrCreateGoogleMobileAdsSettings tries silently first
+                            // (reflection -> self-create) and only falls back to opening
+                            // the plugin's Settings window if all else fails.
+                            Type settingsType = FindGoogleMobileAdsSettingsType();
+                            if (settingsType != null)
+                            {
+                                GetOrCreateGoogleMobileAdsSettings(settingsType);
+                            }
+                            else
+                            {
+                                Debug.LogWarning("[EasyAdMob] Google Mobile Ads SDK not loaded yet - import it in Step 1 first.");
+                            }
+                            Repaint();
+                        };
+                    }
+                }
+                if (!hasAdMobAssembly)
+                {
+                    EditorGUILayout.HelpBox("Import the Google Mobile Ads SDK in Step 1 first.", MessageType.None);
+                }
             }
             else if (isNextGen.Value)
             {
@@ -510,7 +541,7 @@ namespace EasyAdMob.Editor
                         Debug.Log("[EasyAdMob] Download finished. Unpacking package...");
                         
                         AddScriptingDefineSymbol();
-                        AssetDatabase.ImportPackage(TEMP_FILE_PATH, interactive: true);
+                        AssetDatabase.ImportPackage(TEMP_FILE_PATH, interactive: false);
                         // Note: importPackageCompleted fires after the user confirms the
                         // import dialog and the import finishes (followed by a domain reload).
                     }
