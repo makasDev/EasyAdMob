@@ -15,5 +15,6 @@
     "name": "makasDev",
     "url": "https://github.com/makasdev"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "icon": "icon.png"
 }
