@@ -1,5 +1,7 @@
 # EasyAdMob for Unity
 
+![EasyAdMob Icon](icon.png)
+
 A lightweight, plug-and-play Unity Package Manager (UPM) wrapper for **Google Mobile Ads (AdMob)**. Designed to eliminate boilerplate code and streamline setup across your Unity games with standard AdMob formats (Adaptive Banners, Interstitials, Rewarded, and Rewarded Interstitials).
 
 ---
