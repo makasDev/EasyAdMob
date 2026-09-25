@@ -1,4 +1,6 @@
-# EasyAdMob for Unity
+<p align="center">
+  <strong>EasyAdMob for Unity</strong>
+</p>
 
 <p align="center">
   <img src="icon.png" alt="EasyAdMob Icon" width="128" height="128">
